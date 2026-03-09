@@ -1,0 +1,48 @@
+[tool.poetry]
+name = "protoncalbridge"
+version = "0.1.0"
+description = "Bridge Proton Bridge (IMAP) to CalDAV with LLM parsing"
+authors = ["ProtonCalBridge"]
+readme = "README.md"
+packages = [{include = "protoncalbridge", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+pydantic = "^2.9.0"
+pydantic-settings = "^2.5.0"
+httpx = "^0.27.0"
+imap-tools = "^1.0.0"
+caldav = "^1.4.0"
+python-dotenv = "^1.0.0"
+sqlalchemy = "^2.0.0"
+aiosqlite = "^0.20.0"
+jinja2 = "^3.1.0"
+pyyaml = "^6.0.0"
+cryptography = "^43.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+pytest-asyncio = "^0.24.0"
+pytest-cov = "^5.0.0"
+ruff = "^0.6.0"
+mypy = "^1.11.0"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

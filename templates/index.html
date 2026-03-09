@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProtonCalBridge</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header { background: #fff; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { font-size: 24px; margin-bottom: 10px; }
+        .nav { display: flex; gap: 15px; margin-top: 15px; }
+        .nav a { color: #0066cc; text-decoration: none; padding: 8px 16px; border-radius: 4px; background: #eef4fa; }
+        .nav a:hover { background: #dce9f5; }
+        .card { background: #fff; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 18px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-weight: 500; margin-bottom: 5px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .form-group textarea { min-height: 100px; font-family: monospace; }
+        .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .checkbox-group { display: flex; align-items: center; gap: 8px; }
+        .checkbox-group input { width: auto; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #0066cc; color: #fff; }
+        .btn-primary:hover { background: #0052a3; }
+        .btn-secondary { background: #6c757d; color: #fff; }
+        .btn-danger { background: #dc3545; color: #fff; }
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .status { padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; font-weight: 600; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .badge-pending { background: #fff3cd; color: #856404; }
+        .badge-parsed { background: #cce5ff; color: #004085; }
+        .badge-created { background: #d4edda; color: #155724; }
+        .badge-rejected { background: #f8d7da; color: #721c24; }
+        .badge-error { background: #f8d7da; color: #721c24; }
+        .tabs { display: flex; border-bottom: 2px solid #eee; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+        .tab.active { border-bottom-color: #0066cc; color: #0066cc; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .alert { padding: 15px; border-radius: 4px; margin-bottom: 15px; }
+        .alert-info { background: #cce5ff; color: #004085; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ProtonCalBridge</h1>
+            <p>Bridge Proton Bridge (IMAP) to CalDAV with LLM parsing</p>
+            <div class="nav">
+                <a href="#" onclick="showTab('settings')">Settings</a>
+                <a href="#" onclick="showTab('preview')">Preview Emails</a>
+                <a href="#" onclick="showTab('history')">History</a>
+                <a href="#" onclick="showTab('test')">Test Parser</a>
+            </div>
+        </header>
+
+        <div id="status"></div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('settings')">Settings</div>
+            <div class="tab" onclick="showTab('preview')">Preview</div>
+            <div class="tab" onclick="showTab('history')">History</div>
+            <div class="tab" onclick="showTab('test')">Test Parser</div>
+        </div>
+
+        <div id="settings" class="tab-content active">
+            <div class="card">
+                <h2>IMAP / Proton Bridge</h2>
+                <form id="imap-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Host</label>
+                            <input type="text" name="host" value="{{ config.imap.host }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Port</label>
+                            <input type="number" name="port" value="{{ config.imap.port }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" name="username" value="{{ config.imap.username }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" name="password" value="{{ config.imap.password }}">
+                        </div>
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" name="use_ssl" {% if config.imap.use_ssl %}checked{% endif %}>
+                        <label>Use SSL/TLS</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save IMAP Settings</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Email Filters</h2>
+                <form id="filter-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Folders (comma-separated)</label>
+                            <input type="text" name="folders" value="{{ config.filter.folders|join(',') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Keywords (comma-separated)</label>
+                            <input type="text" name="keywords" value="{{ config.filter.keywords|join(',') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Senders (comma-separated)</label>
+                            <input type="text" name="senders" value="{{ config.filter.senders|join(',') }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Recipients (comma-separated)</label>
+                            <input type="text" name="recipients" value="{{ config.filter.recipients|join(',') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Check Interval (minutes)</label>
+                            <input type="number" name="check_interval_minutes" value="{{ config.scheduler.check_interval_minutes }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="unread_only" {% if config.filter.unread_only %}checked{% endif %}>
+                            <label>Unread only</label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="include_attachments" {% if config.filter.include_attachments %}checked{% endif %}>
+                            <label>Include attachments</label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Filter Settings</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>LLM Settings</h2>
+                <form id="llm-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Provider</label>
+                            <select name="provider">
+                                <option value="openai" {% if config.llm.provider == 'openai' %}selected{% endif %}>OpenAI</option>
+                                <option value="anthropic" {% if config.llm.provider == 'anthropic' %}selected{% endif %}>Anthropic</option>
+                                <option value="ollama" {% if config.llm.provider == 'ollama' %}selected{% endif %}>Ollama</option>
+                                <option value="openai-compatible" {% if config.llm.provider == 'openai-compatible' %}selected{% endif %}>OpenAI Compatible</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Model</label>
+                            <input type="text" name="model" value="{{ config.llm.model }}">
+                        </div>
+                        <div class="form-group">
+                            <label>API Key</label>
+                            <input type="password" name="api_key" value="{{ config.llm.api_key }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Base URL (for Ollama/custom)</label>
+                            <input type="text" name="base_url" value="{{ config.llm.base_url or '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Temperature</label>
+                            <input type="number" name="temperature" step="0.1" min="0" max="1" value="{{ config.llm.temperature }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Max Tokens</label>
+                            <input type="number" name="max_tokens" value="{{ config.llm.max_tokens }}">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>System Prompt</label>
+                        <textarea name="system_prompt">{{ config.llm.system_prompt }}</textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save LLM Settings</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>CalDAV Settings</h2>
+                <form id="caldav-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Server URL</label>
+                            <input type="text" name="server_url" value="{{ config.caldav.server_url }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" name="username" value="{{ config.caldav.username }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" name="password" value="{{ config.caldav.password }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Calendar ID</label>
+                            <input type="text" name="calendar_id" value="{{ config.caldav.calendar_id }}">
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="verify_ssl" {% if config.caldav.verify_ssl %}checked{% endif %}>
+                            <label>Verify SSL</label>
+                        </div>
+                    </div>
+                    <div class="btn-group">
+                        <button type="submit" class="btn btn-primary">Save CalDAV Settings</button>
+                        <button type="button" class="btn btn-secondary" onclick="fetchCalendars()">Fetch Calendars</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Processing Options</h2>
+                <form id="processing-form">
+                    <div class="form-row">
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="auto_create" {% if config.processing.auto_create %}checked{% endif %}>
+                            <label>Auto-create events</label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="update_existing" {% if config.processing.update_existing %}checked{% endif %}>
+                            <label>Update existing events</label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="delete_rejected" {% if config.processing.delete_rejected %}checked{% endif %}>
+                            <label>Delete rejected events</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Grace period (minutes)</label>
+                        <input type="number" name="grace_period_minutes" value="{{ config.processing.grace_period_minutes }}">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Processing Settings</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Web UI & Time</h2>
+                <form id="web-form">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Host</label>
+                            <input type="text" name="host" value="{{ config.web.host }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Port</label>
+                            <input type="number" name="port" value="{{ config.web.port }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Timezone</label>
+                            <input type="text" name="timezone" value="{{ config.timezone }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" name="auth_enabled" {% if config.web.auth_enabled %}checked{% endif %}>
+                            <label>Enable password protection</label>
+                        </div>
+                        <div class="form-group">
+                            <label>Web Password</label>
+                            <input type="password" name="password" value="{{ config.web.password }}">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Web Settings</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>Data Management</h2>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-secondary" onclick="exportConfig()">Export Config</button>
+                    <button type="button" class="btn btn-secondary" onclick="importConfig()">Import Config</button>
+                    <button type="button" class="btn btn-danger" onclick="clearHistory()">Clear History</button>
+                    <button type="button" class="btn btn-danger" onclick="resetConfig()">Reset All</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="preview" class="tab-content">
+            <div class="card">
+                <h2>Email Preview</h2>
+                <p>See which emails match your current filters:</p>
+                <button class="btn btn-primary" onclick="previewEmails()" style="margin: 15px 0;">Refresh Preview</button>
+                <div id="preview-results"></div>
+            </div>
+        </div>
+
+        <div id="history" class="tab-content">
+            <div class="card">
+                <h2>Processing History</h2>
+                <button class="btn btn-primary" onclick="loadHistory()" style="margin: 15px 0;">Refresh</button>
+                <div id="history-results"></div>
+            </div>
+        </div>
+
+        <div id="test" class="tab-content">
+            <div class="card">
+                <h2>Test LLM Parser</h2>
+                <form id="test-form">
+                    <div class="form-group">
+                        <label>Email Subject</label>
+                        <input type="text" id="test-subject" placeholder="Meeting tomorrow at 2pm">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Body</label>
+                        <textarea id="test-body" placeholder="Let's meet in the conference room..."></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Parse</button>
+                </form>
+                <div id="test-results"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabId) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.tab[onclick="showTab('${tabId}')"]`).classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.innerHTML = `<div class="status ${type}">${message}</div>`;
+            setTimeout(() => status.innerHTML = '', 5000);
+        }
+
+        async function saveConfig(section, form) {
+            const formData = new FormData(form);
+            const values = {};
+            for (let [key, value] of formData.entries()) {
+                if (value === 'on') {
+                    values[key] = true;
+                } else if (!isNaN(value) && value !== '') {
+                    values[key] = Number(value);
+                } else if (key.includes(',')) {
+                    values[key] = value.split(',').map(v => v.trim()).filter(v => v);
+                } else {
+                    values[key] = value || null;
+                }
+            }
+
+            // Handle array fields
+            if (values.folders && Array.isArray(values.folders)) {
+                values.folders = values.folders;
+            } else if (form.querySelector('[name="folders"]')) {
+                values.folders = values.folders ? values.folders.split(',').map(v => v.trim()) : [];
+            }
+            if (form.querySelector('[name="keywords"]')) {
+                values.keywords = form.querySelector('[name="keywords"]').value.split(',').map(v => v.trim()).filter(v => v);
+            }
+            if (form.querySelector('[name="senders"]')) {
+                values.senders = form.querySelector('[name="senders"]').value.split(',').map(v => v.trim()).filter(v => v);
+            }
+            if (form.querySelector('[name="recipients"]')) {
+                values.recipients = form.querySelector('[name="recipients"]').value.split(',').map(v => v.trim()).filter(v => v);
+            }
+
+            const checkboxFields = ['use_ssl', 'unread_only', 'include_attachments', 'verify_ssl', 'auth_enabled', 'auto_create', 'update_existing', 'delete_rejected'];
+            checkboxFields.forEach(field => {
+                const input = form.querySelector(`[name="${field}"]`);
+                if (input) {
+                    values[field] = input.checked;
+                }
+            });
+
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({section, values})
+                });
+                if (res.ok) {
+                    showStatus('Settings saved successfully!', 'success');
+                } else {
+                    showStatus('Failed to save settings', 'error');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        document.getElementById('imap-form').onsubmit = (e) => { e.preventDefault(); saveConfig('imap', e.target); };
+        document.getElementById('filter-form').onsubmit = (e) => { e.preventDefault(); saveConfig('filter', e.target); };
+        document.getElementById('llm-form').onsubmit = (e) => { e.preventDefault(); saveConfig('llm', e.target); };
+        document.getElementById('caldav-form').onsubmit = (e) => { e.preventDefault(); saveConfig('caldav', e.target); };
+        document.getElementById('processing-form').onsubmit = (e) => { e.preventDefault(); saveConfig('processing', e.target); };
+        document.getElementById('web-form').onsubmit = (e) => { e.preventDefault(); saveConfig('web', e.target); };
+
+        async function previewEmails() {
+            try {
+                const res = await fetch('/api/emails/preview');
+                const emails = await res.json();
+                const container = document.getElementById('preview-results');
+                if (emails.length === 0) {
+                    container.innerHTML = '<p>No emails match the current filters.</p>';
+                    return;
+                }
+                container.innerHTML = `<table><tr><th>Subject</th><th>Sender</th><th>Date</th></tr>${emails.map(e => `<tr><td>${e.subject}</td><td>${e.sender}</td><td>${e.date || 'N/A'}</td></tr>`).join('')}</table>`;
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/history');
+                const emails = await res.json();
+                const container = document.getElementById('history-results');
+                if (emails.length === 0) {
+                    container.innerHTML = '<p>No emails processed yet.</p>';
+                    return;
+                }
+                container.innerHTML = `<table><tr><th>Subject</th><th>Sender</th><th>Status</th><th>Processed</th></tr>${emails.map(e => `<tr><td>${e.subject}</td><td>${e.sender}</td><td><span class="badge badge-${e.status}">${e.status}</span></td><td>${e.processed_at || 'N/A'}</td></tr>`).join('')}</table>`;
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        document.getElementById('test-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const subject = document.getElementById('test-subject').value;
+            const body = document.getElementById('test-body').value;
+            try {
+                const res = await fetch('/api/emails/test-parse', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({subject, body})
+                });
+                const result = await res.json();
+                const container = document.getElementById('test-results');
+                if (result.success) {
+                    container.innerHTML = `<div class="alert alert-info"><strong>Parsed Event:</strong><br>Title: ${result.event.title}<br>Start: ${result.event.start_time || 'N/A'}<br>End: ${result.event.end_time || 'N/A'}<br>Location: ${result.event.location || 'N/A'}</div>`;
+                } else {
+                    container.innerHTML = `<div class="alert alert-info">${result.error}</div>`;
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        };
+
+        async function fetchCalendars() {
+            try {
+                const res = await fetch('/api/calendars', {method: 'POST'});
+                const calendars = await res.json();
+                showStatus('Found ' + calendars.length + ' calendars', 'success');
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function exportConfig() {
+            const res = await fetch('/api/config/export', {method: 'POST'});
+            const config = await res.json();
+            const blob = new Blob([JSON.stringify(config, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'protoncalbridge-config.json';
+            a.click();
+        }
+
+        async function importConfig() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                const text = await file.text();
+                const config = JSON.parse(text);
+                await fetch('/api/config/import', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config)});
+                showStatus('Config imported!', 'success');
+            };
+            input.click();
+        }
+
+        async function clearHistory() {
+            if (confirm('Clear all history?')) {
+                await fetch('/api/history/clear', {method: 'POST'});
+                showStatus('History cleared', 'success');
+                loadHistory();
+            }
+        }
+
+        async function resetConfig() {
+            if (confirm('Reset all settings to defaults?')) {
+                await fetch('/api/config/reset', {method: 'POST'});
+                showStatus('Config reset', 'success');
+            }
+        }
+    </script>
+</body>
+</html>
