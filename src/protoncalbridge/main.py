@@ -139,53 +139,56 @@ async def clear_history(session: AsyncSession = Depends(get_session)):
 
 @app.get("/api/emails/preview")
 async def preview_emails():
-    config = await ConfigManager.get_config()
+    try:
+        config = await ConfigManager.get_config()
 
-    imap_config = IMAPConfig(
-        host=config.get("imap", {}).get("host", "127.0.0.1"),
-        port=config.get("imap", {}).get("port", 1143),
-        username=config.get("imap", {}).get("username", ""),
-        password=config.get("imap", {}).get("password", ""),
-        use_ssl=config.get("imap", {}).get("use_ssl", True),
-    )
+        imap_config = IMAPConfig(
+            host=config.get("imap", {}).get("host", "127.0.0.1"),
+            port=config.get("imap", {}).get("port", 1143),
+            username=config.get("imap", {}).get("username", ""),
+            password=config.get("imap", {}).get("password", ""),
+            use_ssl=config.get("imap", {}).get("use_ssl", True),
+        )
 
-    filter_config = FilterConfig(
-        folders=config.get("filter", {}).get("folders", ["INBOX"]),
-        keywords=config.get("filter", {}).get("keywords", []),
-        keywords_regex=config.get("filter", {}).get("keywords_regex", []),
-        senders=config.get("filter", {}).get("senders", []),
-        senders_regex=config.get("filter", {}).get("senders_regex", []),
-        recipients=config.get("filter", {}).get("recipients", []),
-        recipients_regex=config.get("filter", {}).get("recipients_regex", []),
-        include_attachments=config.get("filter", {}).get("include_attachments", False),
-        unread_only=config.get("filter", {}).get("unread_only", True),
-        date_since_days=config.get("filter", {}).get("date_since_days"),
-    )
+        filter_config = FilterConfig(
+            folders=config.get("filter", {}).get("folders", ["INBOX"]),
+            keywords=config.get("filter", {}).get("keywords", []),
+            keywords_regex=config.get("filter", {}).get("keywords_regex", []),
+            senders=config.get("filter", {}).get("senders", []),
+            senders_regex=config.get("filter", {}).get("senders_regex", []),
+            recipients=config.get("filter", {}).get("recipients", []),
+            recipients_regex=config.get("filter", {}).get("recipients_regex", []),
+            include_attachments=config.get("filter", {}).get("include_attachments", False),
+            unread_only=config.get("filter", {}).get("unread_only", True),
+            date_since_days=config.get("filter", {}).get("date_since_days"),
+        )
 
-    client = IMAPClient(imap_config)
-    client.connect()
+        client = IMAPClient(imap_config)
+        client.connect()
 
-    emails = client.fetch_emails(
-        folder=filter_config.folders[0] if filter_config.folders else "INBOX",
-        keywords=filter_config.keywords,
-        senders=filter_config.senders,
-        recipients=filter_config.recipients,
-        unread_only=filter_config.unread_only,
-        include_attachments=filter_config.include_attachments,
-        date_since_days=filter_config.date_since_days,
-    )
+        emails = client.fetch_emails(
+            folder=filter_config.folders[0] if filter_config.folders else "INBOX",
+            keywords=filter_config.keywords,
+            senders=filter_config.senders,
+            recipients=filter_config.recipients,
+            unread_only=filter_config.unread_only,
+            include_attachments=filter_config.include_attachments,
+            date_since_days=filter_config.date_since_days,
+        )
 
-    client.disconnect()
+        client.disconnect()
 
-    return [
-        {
-            "message_id": e.message_id,
-            "subject": e.subject,
-            "sender": e.sender,
-            "date": e.date.isoformat() if e.date else None,
-        }
-        for e in emails
-    ]
+        return [
+            {
+                "message_id": e.message_id,
+                "subject": e.subject,
+                "sender": e.sender,
+                "date": e.date.isoformat() if e.date else None,
+            }
+            for e in emails
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/emails/test-parse")

@@ -4,8 +4,7 @@ services:
   protoncalbridge:
     build: .
     container_name: protoncalbridge
-    ports:
-      - "8080:8080"
+    network_mode: host
     volumes:
       - ./data:/data
     env_file:

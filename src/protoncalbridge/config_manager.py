@@ -185,10 +185,19 @@ class ConfigManager:
 
     @staticmethod
     async def set_config(key: str, value: Any) -> None:
+        from datetime import datetime
         async with async_session() as session:
             json_value = json.dumps(value)
-            config = Config(key=key, value=json_value)
-            session.add(config)
+            result = await session.execute(select(Config).where(Config.key == key))
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                existing.value = json_value
+                existing.updated_at = datetime.utcnow()
+            else:
+                config = Config(key=key, value=json_value)
+                session.add(config)
+            
             await session.commit()
             logger.info(f"Config updated: {key}")
 

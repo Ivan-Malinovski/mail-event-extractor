@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-from imap_tools import AND, OR, FolderInfo, MailBox, MailMessage
+from imap_tools import AND, OR, FolderInfo, MailBox, MailMessage, MailBoxUnencrypted
 
 from protoncalbridge.exceptions import IMAPAuthenticationError, IMAPConnectionError
 
@@ -39,7 +39,10 @@ class IMAPClient:
 
     def connect(self) -> None:
         try:
-            self._mailbox = MailBox(self.config.host, self.config.port)
+            if self.config.use_ssl:
+                self._mailbox = MailBox(self.config.host, self.config.port)
+            else:
+                self._mailbox = MailBoxUnencrypted(self.config.host, self.config.port)
             self._mailbox.login(self.config.username, self.config.password)
             logger.info(f"Connected to IMAP at {self.config.host}:{self.config.port}")
         except Exception as e:

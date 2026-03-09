@@ -80,6 +80,9 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse LLM response as JSON: {e}")
             raise LLMParseError(f"Invalid JSON response from LLM: {e}") from e
+        except httpx.HTTPStatusError as e:
+            logger.error(f"LLM HTTP error: {e.response.status_code} - {e.response.text}")
+            raise LLMError(f"LLM HTTP error: {e.response.status_code} - {e.response.text[:200]}") from e
         except Exception as e:
             logger.error(f"LLM request failed: {e}")
             raise LLMError(f"LLM request failed: {e}") from e

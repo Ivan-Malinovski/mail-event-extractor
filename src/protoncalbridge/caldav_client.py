@@ -34,7 +34,7 @@ class CalDAVClient:
                 url=self.config.server_url,
                 username=self.config.username,
                 password=self.config.password,
-                ssl_verify=self.config.verify_ssl,
+                ssl_verify_cert=self.config.verify_ssl,
             )
             principal = self._client.principal()
             calendars = principal.calendars()
