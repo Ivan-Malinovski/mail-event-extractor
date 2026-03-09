@@ -489,8 +489,12 @@
         }
 
         async function testIMAP() {
+            console.log("Testing IMAP connection...");
             const form = document.getElementById('imap-form');
-            const formData = new FormData(form);
+            if (!form) {
+                alert('IMAP form not found!');
+                return;
+            }
             const data = {
                 host: form.querySelector('[name="host"]').value,
                 port: parseInt(form.querySelector('[name="port"]').value) || 1143,
@@ -499,31 +503,40 @@
                 use_ssl: form.querySelector('[name="use_ssl"]').checked
             };
             
+            console.log("IMAP data:", data);
+            
             if (!data.host || !data.username || !data.password) {
                 showStatus('Please fill in host, username, and password', 'error');
                 return;
             }
             
             try {
+                showStatus('Testing IMAP connection...', 'success');
                 const res = await fetch('/api/test/imap', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(data)
                 });
                 const result = await res.json();
+                console.log("IMAP result:", result);
                 if (result.success) {
                     showStatus('IMAP Connection Successful! ' + result.message, 'success');
                 } else {
                     showStatus('IMAP Connection Failed: ' + result.error, 'error');
                 }
             } catch (e) {
+                console.error("IMAP error:", e);
                 showStatus('Error: ' + e.message, 'error');
             }
         }
 
         async function testLLM() {
+            console.log("Testing LLM connection...");
             const form = document.getElementById('llm-form');
-            const formData = new FormData(form);
+            if (!form) {
+                alert('LLM form not found!');
+                return;
+            }
             const data = {
                 provider: form.querySelector('[name="provider"]').value,
                 api_key: form.querySelector('[name="api_key"]').value,
@@ -539,18 +552,22 @@
             }
             
             try {
+                console.log("Testing LLM with:", data.model, data.provider);
+                showStatus('Testing LLM connection...', 'success');
                 const res = await fetch('/api/test/llm', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(data)
                 });
                 const result = await res.json();
+                console.log("LLM result:", result);
                 if (result.success) {
                     showStatus('LLM Connection Successful! ' + result.message, 'success');
                 } else {
                     showStatus('LLM Connection Failed: ' + result.error, 'error');
                 }
             } catch (e) {
+                console.error("LLM error:", e);
                 showStatus('Error: ' + e.message, 'error');
             }
         }
@@ -570,18 +587,22 @@
             }
             
             try {
+                console.log("Testing CalDAV with:", data.server_url);
+                showStatus('Testing CalDAV connection...', 'success');
                 const res = await fetch('/api/test/caldav', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(data)
                 });
                 const result = await res.json();
+                console.log("CalDAV result:", result);
                 if (result.success) {
                     showStatus('CalDAV Connection Successful! ' + result.message, 'success');
                 } else {
                     showStatus('CalDAV Connection Failed: ' + result.error, 'error');
                 }
             } catch (e) {
+                console.error("CalDAV error:", e);
                 showStatus('Error: ' + e.message, 'error');
             }
         }
