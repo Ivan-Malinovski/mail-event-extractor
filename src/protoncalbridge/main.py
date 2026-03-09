@@ -152,8 +152,11 @@ async def preview_emails():
     filter_config = FilterConfig(
         folders=config.get("filter", {}).get("folders", ["INBOX"]),
         keywords=config.get("filter", {}).get("keywords", []),
+        keywords_regex=config.get("filter", {}).get("keywords_regex", []),
         senders=config.get("filter", {}).get("senders", []),
+        senders_regex=config.get("filter", {}).get("senders_regex", []),
         recipients=config.get("filter", {}).get("recipients", []),
+        recipients_regex=config.get("filter", {}).get("recipients_regex", []),
         include_attachments=config.get("filter", {}).get("include_attachments", False),
         unread_only=config.get("filter", {}).get("unread_only", True),
         date_since_days=config.get("filter", {}).get("date_since_days"),
@@ -246,6 +249,70 @@ async def test_imap_connection(req: TestIMAPRequest):
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@app.post("/api/imap/folders")
+async def get_imap_folders(req: TestIMAPRequest):
+    try:
+        imap_config = IMAPConfig(
+            host=req.host,
+            port=req.port,
+            username=req.username,
+            password=req.password,
+            use_ssl=req.use_ssl,
+        )
+        client = IMAPClient(imap_config)
+        client.connect()
+        
+        folders = client.get_folders()
+        client.disconnect()
+        
+        return {
+            "success": True,
+            "folders": [{"name": f.name, "flags": list(f.flags) if f.flags else []} for f in folders]
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/presets")
+async def get_presets():
+    from protoncalbridge.config_manager import PRESETS
+    return {"presets": PRESETS}
+
+
+class ApplyPresetRequest(BaseModel):
+    preset_keys: list[str]
+
+
+@app.post("/api/presets/apply")
+async def apply_preset(req: ApplyPresetRequest):
+    from protoncalbridge.config_manager import PRESETS, ConfigManager
+    
+    all_keywords = []
+    all_keywords_regex = []
+    
+    for preset_key in req.preset_keys:
+        if preset_key in PRESETS:
+            preset = PRESETS[preset_key]
+            all_keywords.extend(preset.get("keywords", []))
+            all_keywords_regex.extend(preset.get("keywords_regex", []))
+    
+    all_keywords = list(set(all_keywords))
+    all_keywords_regex = list(set(all_keywords_regex))
+    
+    current_config = await ConfigManager.get_config()
+    current_keywords = current_config.get("filter", {}).get("keywords", [])
+    current_keywords_regex = current_config.get("filter", {}).get("keywords_regex", [])
+    
+    combined_keywords = list(set(current_keywords + all_keywords))
+    combined_keywords_regex = list(set(current_keywords_regex + all_keywords_regex))
+    
+    return {
+        "success": True,
+        "keywords": combined_keywords,
+        "keywords_regex": combined_keywords_regex,
+    }
 
 
 @app.post("/api/test/llm")
@@ -383,8 +450,11 @@ async def restart_poller():
     filter_config = FilterConfig(
         folders=filter_data.get("folders", ["INBOX"]),
         keywords=filter_data.get("keywords", []),
+        keywords_regex=filter_data.get("keywords_regex", []),
         senders=filter_data.get("senders", []),
+        senders_regex=filter_data.get("senders_regex", []),
         recipients=filter_data.get("recipients", []),
+        recipients_regex=filter_data.get("recipients_regex", []),
         include_attachments=filter_data.get("include_attachments", False),
         unread_only=filter_data.get("unread_only", True),
         date_since_days=filter_data.get("date_since_days"),

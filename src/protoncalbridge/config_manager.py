@@ -21,8 +21,11 @@ DEFAULT_CONFIG = {
     "filter": {
         "folders": ["INBOX"],
         "keywords": [],
+        "keywords_regex": [],
         "senders": [],
+        "senders_regex": [],
         "recipients": [],
+        "recipients_regex": [],
         "include_attachments": False,
         "unread_only": True,
         "date_since_days": None,
@@ -65,6 +68,93 @@ DEFAULT_CONFIG = {
     "logging": {
         "level": "INFO",
         "retention_days": 30,
+    },
+}
+
+
+PRESETS = {
+    "all_events": {
+        "name": "All Calendar Events",
+        "keywords": ["meeting", "appointment", "event", "invite", "invitation", "scheduled", "calendar"],
+        "keywords_regex": [
+            r"meeting\s+at",
+            r"invite[d]?\s+to",
+            r"please\s+join",
+            r"calendar\s+invite",
+            r"next\s+\w+\s+at",
+            r"reminder:",
+            r"upcoming\s+event",
+        ],
+    },
+    "flights": {
+        "name": "Flight Tickets",
+        "keywords": ["flight", "airline", "boarding", "departure", "arrival", "ticket"],
+        "keywords_regex": [
+            r"flight\s+\w+",
+            r"boarding\s+pass",
+            r"depart(s|ing)?\s+at",
+            r"arriv(es|al)?\s+at",
+            r"gate\s+\w+",
+            r"flight\s+number",
+            r"PNR[:\s]+\w+",
+        ],
+    },
+    "hotels": {
+        "name": "Hotel Reservations",
+        "keywords": ["hotel", "reservation", "booking", "check-in", "check-out", "accommodation"],
+        "keywords_regex": [
+            r"check[-\s]?in",
+            r"check[-\s]?out",
+            r"hotel\s+\w+",
+            r"booking\s+confirmation",
+            r"reservation\s+\w+",
+            r"stay\s+from",
+        ],
+    },
+    "restaurants": {
+        "name": "Restaurant Reservations",
+        "keywords": ["restaurant", "dinner", "lunch", "reservation", "table", "booking"],
+        "keywords_regex": [
+            r"restaurant\s+\w+",
+            r"table\s+for",
+            r"dinner\s+at",
+            r"lunch\s+at",
+            r"reservation\s+at",
+            r"booking\s+for",
+        ],
+    },
+    "reminders": {
+        "name": "Reminders & Tasks",
+        "keywords": ["reminder", "todo", "task", "follow-up", "don't forget"],
+        "keywords_regex": [
+            r"reminder[:\s]",
+            r"to-do",
+            r"don't\s+forget",
+            r"please\s+remember",
+            r"action\s+required",
+            r"follow\s+up",
+        ],
+    },
+    "travel": {
+        "name": "Travel (General)",
+        "keywords": ["travel", "trip", "itinerary", "booking", "confirmation"],
+        "keywords_regex": [
+            r"travel\s+\w+",
+            r"trip\s+to",
+            r"itinerary",
+            r"行程",
+            r"旅行",
+        ],
+    },
+    " concerts": {
+        "name": "Concerts & Events",
+        "keywords": ["concert", "ticket", "event", "show", "festival", "gig"],
+        "keywords_regex": [
+            r"concert\s+\w+",
+            r"show\s+at",
+            r"festival",
+            r"ticket\s+\w+",
+        ],
     },
 }
 

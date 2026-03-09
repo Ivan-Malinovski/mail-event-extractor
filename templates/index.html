@@ -113,12 +113,28 @@
                             <input type="text" name="folders" value="{{ config.filter.folders|join(',') }}">
                         </div>
                         <div class="form-group">
+                            <label>Check Interval (minutes)</label>
+                            <input type="number" name="check_interval_minutes" value="{{ config.scheduler.check_interval_minutes }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
                             <label>Keywords (comma-separated)</label>
                             <input type="text" name="keywords" value="{{ config.filter.keywords|join(',') }}">
                         </div>
                         <div class="form-group">
+                            <label>Keywords (Regex, comma-separated)</label>
+                            <input type="text" name="keywords_regex" value="{{ config.filter.keywords_regex|join(',') }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
                             <label>Senders (comma-separated)</label>
                             <input type="text" name="senders" value="{{ config.filter.senders|join(',') }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Senders (Regex, comma-separated)</label>
+                            <input type="text" name="senders_regex" value="{{ config.filter.senders_regex|join(',') }}">
                         </div>
                     </div>
                     <div class="form-row">
@@ -127,8 +143,8 @@
                             <input type="text" name="recipients" value="{{ config.filter.recipients|join(',') }}">
                         </div>
                         <div class="form-group">
-                            <label>Check Interval (minutes)</label>
-                            <input type="number" name="check_interval_minutes" value="{{ config.scheduler.check_interval_minutes }}">
+                            <label>Recipients (Regex, comma-separated)</label>
+                            <input type="text" name="recipients_regex" value="{{ config.filter.recipients_regex|join(',') }}">
                         </div>
                     </div>
                     <div class="form-row">
@@ -141,7 +157,11 @@
                             <label>Include attachments</label>
                         </div>
                     </div>
-                    <button type="submit" class="btn btn-primary">Save Filter Settings</button>
+                    <div class="btn-group">
+                        <button type="submit" class="btn btn-primary">Save Filter Settings</button>
+                        <button type="button" class="btn btn-secondary" onclick="showPresets()">Pre-fill Presets</button>
+                        <button type="button" class="btn btn-secondary" onclick="fetchFolders()">Fetch Folders</button>
+                    </div>
                 </form>
             </div>
 
@@ -563,6 +583,104 @@
                 }
             } catch (e) {
                 showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function fetchFolders() {
+            const imapForm = document.getElementById('imap-form');
+            const data = {
+                host: imapForm.querySelector('[name="host"]').value,
+                port: parseInt(imapForm.querySelector('[name="port"]').value) || 1143,
+                username: imapForm.querySelector('[name="username"]').value,
+                password: imapForm.querySelector('[name="password"]').value,
+                use_ssl: imapForm.querySelector('[name="use_ssl"]').checked
+            };
+            
+            if (!data.host || !data.username || !data.password) {
+                showStatus('Please fill in IMAP host, username, and password first', 'error');
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/imap/folders', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if (result.success) {
+                    const filterForm = document.getElementById('filter-form');
+                    const folderNames = result.folders.map(f => f.name).join(', ');
+                    filterForm.querySelector('[name="folders"]').value = folderNames;
+                    showStatus('Found ' + result.folders.length + ' folders!', 'success');
+                } else {
+                    showStatus('Failed to fetch folders: ' + result.error, 'error');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function showPresets() {
+            try {
+                const res = await fetch('/api/presets');
+                const data = await res.json();
+                const presets = data.presets;
+                
+                let html = '<div class="card"><h2>Select Presets</h2><p>Choose which event types to look for:</p>';
+                html += '<div style="max-height: 300px; overflow-y: auto;">';
+                
+                for (const [key, preset] of Object.entries(presets)) {
+                    html += `<div class="form-group checkbox-group">
+                        <input type="checkbox" id="preset-${key}" value="${key}">
+                        <label for="preset-${key}">${preset.name}</label>
+                    </div>`;
+                }
+                
+                html += '</div>';
+                html += '<div class="btn-group" style="margin-top: 15px;">';
+                html += '<button type="button" class="btn btn-primary" onclick="applyPresets()">Apply Selected</button>';
+                html += '<button type="button" class="btn btn-secondary" onclick="document.getElementById(\'settings\').scrollIntoView()">Cancel</button>';
+                html += '</div></div>';
+                
+                const settingsDiv = document.getElementById('settings');
+                settingsDiv.insertAdjacentHTML('afterbegin', html);
+                window.scrollTo(0, 0);
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function applyPresets() {
+            const checkboxes = document.querySelectorAll('#settings input[type="checkbox"][id^="preset-"]:checked');
+            const presetKeys = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (presetKeys.length === 0) {
+                showStatus('Please select at least one preset', 'error');
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/presets/apply', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({preset_keys: presetKeys})
+                });
+                const result = await res.json();
+                
+                if (result.success) {
+                    const filterForm = document.getElementById('filter-form');
+                    filterForm.querySelector('[name="keywords"]').value = result.keywords.join(', ');
+                    filterForm.querySelector('[name="keywords_regex"]').value = result.keywords_regex.join(', ');
+                    showStatus('Presets applied! Save the filter settings to keep them.', 'success');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+            
+            const presetCard = document.querySelector('#settings > .card');
+            if (presetCard && presetCard.querySelector('h2')?.textContent === 'Select Presets') {
+                presetCard.remove();
             }
         }
 
