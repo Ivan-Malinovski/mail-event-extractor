@@ -108,30 +108,30 @@ class IMAPClient:
         recipients: list[str] | None = None,
         unread_only: bool = True,
         date_since_days: int | None = None,
-    ) -> AND:
+    ) -> AND | OR:
         conditions = []
 
         if unread_only:
             conditions.append(AND(seen=False))
 
         if senders:
-            for sender in senders:
-                conditions.append(OR(from_=sender))
+            sender_conditions = [OR(from_=s) for s in senders]
+            conditions.append(OR(*sender_conditions))
 
         if recipients:
-            for recipient in recipients:
-                conditions.append(OR(to=recipient))
+            recipient_conditions = [OR(to_=r) for r in recipients]
+            conditions.append(OR(*recipient_conditions))
 
         if keywords:
-            for keyword in keywords:
-                conditions.append(OR(subject=keyword, body=keyword))
+            keyword_conditions = [OR(subject=k, body=k) for k in keywords]
+            conditions.append(OR(*keyword_conditions))
 
         if not conditions:
             return AND(all=True)
 
         return AND(*conditions)
 
-    def _parse_message(self, msg: MailMessage, include_attachments: bool) -> EmailMessage:
+    def _parse_message(self, msg, include_attachments: bool) -> EmailMessage:
         has_attachments = len(msg.attachments) > 0 if include_attachments else False
 
         return EmailMessage(
@@ -145,14 +145,20 @@ class IMAPClient:
             has_attachments=has_attachments,
         )
 
-    def _get_text_body(self, msg: MailMessage) -> str | None:
-        for part in msg.text_parts:
-            if part.content_type == "text/plain":
-                return part.content
+    def _get_text_body(self, msg) -> str | None:
+        try:
+            for part in msg.text_parts:
+                if part.content_type == "text/plain":
+                    return part.content
+        except Exception:
+            pass
         return None
 
-    def _get_html_body(self, msg: MailMessage) -> str | None:
-        for part in msg.text_parts:
-            if part.content_type == "text/html":
-                return part.content
+    def _get_html_body(self, msg) -> str | None:
+        try:
+            for part in msg.text_parts:
+                if part.content_type == "text/html":
+                    return part.content
+        except Exception:
+            pass
         return None

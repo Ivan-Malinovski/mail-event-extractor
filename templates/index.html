@@ -110,7 +110,7 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label>Folders (comma-separated)</label>
-                            <input type="text" name="folders" value="{{ config.filter.folders|join(',') }}">
+                            <input type="text" name="folders" value="{{ config.filter.folders|default(['INBOX'])|join(',') }}">
                         </div>
                         <div class="form-group">
                             <label>Check Interval (minutes)</label>
@@ -120,31 +120,31 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label>Keywords (comma-separated)</label>
-                            <input type="text" name="keywords" value="{{ config.filter.keywords|join(',') }}">
+                            <input type="text" name="keywords" value="{{ config.filter.keywords|default([])|join(',') }}">
                         </div>
                         <div class="form-group">
                             <label>Keywords (Regex, comma-separated)</label>
-                            <input type="text" name="keywords_regex" value="{{ config.filter.keywords_regex|join(',') }}">
+                            <input type="text" name="keywords_regex" value="{{ config.filter.keywords_regex|default([])|join(',') }}">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Senders (comma-separated)</label>
-                            <input type="text" name="senders" value="{{ config.filter.senders|join(',') }}">
+                            <input type="text" name="senders" value="{{ config.filter.senders|default([])|join(',') }}">
                         </div>
                         <div class="form-group">
                             <label>Senders (Regex, comma-separated)</label>
-                            <input type="text" name="senders_regex" value="{{ config.filter.senders_regex|join(',') }}">
+                            <input type="text" name="senders_regex" value="{{ config.filter.senders_regex|default([])|join(',') }}">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label>Recipients (comma-separated)</label>
-                            <input type="text" name="recipients" value="{{ config.filter.recipients|join(',') }}">
+                            <input type="text" name="recipients" value="{{ config.filter.recipients|default([])|join(',') }}">
                         </div>
                         <div class="form-group">
                             <label>Recipients (Regex, comma-separated)</label>
-                            <input type="text" name="recipients_regex" value="{{ config.filter.recipients_regex|join(',') }}">
+                            <input type="text" name="recipients_regex" value="{{ config.filter.recipients_regex|default([])|join(',') }}">
                         </div>
                     </div>
                     <div class="form-row">
@@ -429,15 +429,21 @@
         async function previewEmails() {
             try {
                 const res = await fetch('/api/emails/preview');
+                if (!res.ok) {
+                    const err = await res.text();
+                    showStatus('Preview error: ' + err, 'error');
+                    return;
+                }
                 const emails = await res.json();
                 const container = document.getElementById('preview-results');
                 if (emails.length === 0) {
-                    container.innerHTML = '<p>No emails match the current filters.</p>';
+                    container.innerHTML = '<p style="padding:10px;">No emails match current filters. Try adjusting keywords or disabling "unread only".</p>';
                     return;
                 }
                 container.innerHTML = `<table><tr><th>Subject</th><th>Sender</th><th>Date</th></tr>${emails.map(e => `<tr><td>${e.subject}</td><td>${e.sender}</td><td>${e.date || 'N/A'}</td></tr>`).join('')}</table>`;
             } catch (e) {
-                showStatus('Error: ' + e.message, 'error');
+                console.error('Preview error:', e);
+                showStatus('Error loading preview: ' + e.message, 'error');
             }
         }
 

@@ -1,0 +1,233 @@
+================================================================================
+PROTONCALBRIDGE - CODE REVIEW FINDINGS
+================================================================================
+
+This document outlines issues found during code review of the ProtonCalBridge
+project. Issues are categorized by severity and impact.
+
+================================================================================
+SECTION 1: BUGS
+================================================================================
+
+1.1 CRITICAL: _check_folders Does Nothing
+------------------------------------------
+Location: src/protoncalbridge/filter.py (lines 72-75)
+
+    def _check_folders(self, email: EmailMessage) -> bool:
+        if not self.config.folders:
+            return True
+        return True  # <-- Always returns True!
+
+The method is supposed to check if the email is in an allowed folder, but
+it always returns True regardless of configuration.
+
+IMPACT: Folder filtering is completely broken.
+FIX: Implement actual folder checking. Note: This is confusing because
+IMAP folder filtering happens at fetch time, not per-email.
+
+---
+
+1.2 HIGH: New Connection Per Email (Performance)
+------------------------------------------------
+Location: src/protoncalbridge/scheduler.py (lines 95-114, 137-155, 162-174)
+
+For each email processed, the code:
+1. Creates new IMAPClient and connects (line 95-96)
+2. Creates new LLMParser and connects (line 137)
+3. Creates new CalDAVClient and connects (line 162)
+
+This is extremely inefficient - a new connection is established for every
+single email even when processing hundreds of emails in one batch.
+
+IMPACT: Severe performance degradation, potential rate limiting from
+IMAP/LLM/CalDAV servers.
+FIX: Reuse clients across the batch of emails.
+
+---
+
+1.3 MEDIUM: Only First Folder Processed
+---------------------------------------
+Location: src/protoncalbridge/scheduler.py (line 99)
+
+    folder=self.filter_config.folders[0] if self.filter_config.folders else "INBOX"
+
+Only the first folder is monitored, even if multiple folders are configured.
+
+IMPACT: Users monitoring multiple folders only get one folder's emails.
+FIX: Loop through all configured folders.
+
+---
+
+================================================================================
+SECTION 2: ARCHITECTURE ISSUES
+================================================================================
+
+2.1 HIGH: No Tests
+-------------------
+Location: tests/ directory (does not exist)
+
+The pyproject.toml includes pytest and pytest-asyncio as dev dependencies,
+and pytest is configured, but there is no tests directory or any test files.
+
+IMPACT: No way to verify code correctness, regressions go unnoticed.
+FIX: Add tests for each module. Priority: filter.py, llm_parser.py.
+
+---
+
+2.2 MEDIUM: Global Mutable State
+---------------------------------
+Location: src/protoncalbridge/main.py (lines 27, 32, 36-37, 431-510)
+
+    global poller
+
+The poller is stored as a global variable, making it impossible to properly
+unit test the FastAPI app without side effects.
+
+IMPACT: Difficult to test, potential race conditions.
+FIX: Use dependency injection or an application state object.
+
+---
+
+2.3 MEDIUM: Sync-Async Mismatch
+-------------------------------
+Location: src/protoncalbridge/imap_client.py
+
+The IMAPClient uses synchronous operations (imap_tools MailBox) but is used
+in an async context in scheduler.py. This blocks the event loop.
+
+IMPACT: Application may hang during IMAP operations.
+FIX: Wrap IMAP operations in asyncio.to_thread() or use async imap library.
+
+---
+
+================================================================================
+SECTION 3: MISSING FEATURES
+================================================================================
+
+3.1 MEDIUM: Timezone Not Used
+-----------------------------
+Location: src/protoncalbridge/config_manager.py (line 67)
+
+"timezone": "UTC" is stored in config but never used. The LLM parsing returns
+datetime objects but there's no timezone conversion applied.
+
+IMPACT: Events may have wrong times if user is not in UTC.
+FIX: Use pytz or zoneinfo to convert times to configured timezone.
+
+---
+
+3.2 MEDIUM: ICS Content Not Properly Escaped
+--------------------------------------------
+Location: src/protoncalbridge/caldav_client.py (lines 130-152)
+
+The ICS file generation doesn't escape special characters:
+- Newlines in description
+- Commas/semicolons in location
+- Backslashes anywhere
+
+IMPACT: Invalid ICS files may be created, causing CalDAV sync failures.
+FIX: Implement proper ICS escaping per RFC 5545:
+- Newlines -> \n
+- Commas -> \,
+- Semicolons -> \;
+- Backslashes -> \\
+
+---
+
+3.3 LOW: No Retry Logic
+-----------------------
+Failed IMAP, LLM, or CalDAV operations fail immediately with no retry.
+
+IMPACT: Transient failures cause lost events.
+FIX: Add retry logic with exponential backoff.
+
+---
+
+3.4 LOW: Graceful Shutdown Incomplete
+-------------------------------------
+Location: src/protoncalbridge/scheduler.py (lines 63-77)
+
+The stop() method cancels the task immediately without waiting for the
+current poll cycle to complete.
+
+IMPACT: In-progress emails may be lost or duplicated on restart.
+FIX: Add a "shutting_down" flag and wait for current cycle to complete.
+
+---
+
+================================================================================
+SECTION 4: CODE QUALITY ISSUES
+================================================================================
+
+4.1 LOW: Unused Import
+-----------------------
+Location: src/protoncalbridge/imap_client.py (line 7)
+
+    from imap_tools import AND, OR, FolderInfo, ...
+
+OR is imported but never used. Only AND is used.
+
+---
+
+4.2 LOW: Magic Strings
+----------------------
+Status values are scattered throughout:
+- "pending" (database.py, scheduler.py)
+- "parsed" (scheduler.py)
+- "created" (scheduler.py)
+- "llm_error" (scheduler.py)
+- "caldav_error" (scheduler.py)
+
+IMPACT: Typos cause silent failures, hard to search.
+FIX: Create an enum: class EmailStatus(str, Enum)
+
+---
+
+4.3 LOW: Missing Input Validation
+---------------------------------
+Some endpoints accept dictionaries without full Pydantic validation.
+
+IMPACT: Invalid data could cause runtime errors.
+FIX: Create proper request models with field validation.
+
+---
+
+4.4 LOW: Inconsistent Error Handling
+------------------------------------
+Location: main.py lines 190-191, 226-227, etc.
+
+Bare except blocks and generic Exception catches everywhere.
+
+IMPACT: Hard to debug, may hide real issues.
+FIX: Catch specific exceptions, log appropriately.
+
+---
+
+================================================================================
+SECTION 5: RECOMMENDED PRIORITY ORDER
+================================================================================
+
+1. BUGS (High Priority):
+   - 1.1 Fix _check_folders
+   - 1.2 Fix connection-per-email
+   - 1.3 Fix multi-folder
+
+2. ARCHITECTURE:
+   - 2.1 Add tests
+   - 2.2 Refactor global state
+   - 2.3 Fix sync-async
+
+3. FEATURES:
+   - 3.1 Timezone handling
+   - 3.2 ICS escaping
+   - 3.3 Retry logic
+   - 3.4 Graceful shutdown
+
+4. QUALITY:
+   - Clean up imports
+   - Add enums
+   - Better validation
+
+================================================================================
+END OF REPORT
+================================================================================
