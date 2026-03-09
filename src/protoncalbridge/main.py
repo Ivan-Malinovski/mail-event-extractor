@@ -51,6 +51,30 @@ class TestParseRequest(BaseModel):
     body: str
 
 
+class TestIMAPRequest(BaseModel):
+    host: str
+    port: int
+    username: str
+    password: str
+    use_ssl: bool = True
+
+
+class TestLLMRequest(BaseModel):
+    provider: str
+    api_key: str
+    model: str
+    base_url: str | None = None
+    temperature: float = 0.0
+    max_tokens: int = 1000
+
+
+class TestCalDAVRequest(BaseModel):
+    server_url: str
+    username: str
+    password: str
+    verify_ssl: bool = True
+
+
 async def get_session():
     async with async_session() as session:
         yield session
@@ -197,6 +221,88 @@ async def test_parse_email(req: TestParseRequest):
         return {"success": False, "error": str(e)}
     finally:
         await parser.close()
+
+
+@app.post("/api/test/imap")
+async def test_imap_connection(req: TestIMAPRequest):
+    try:
+        imap_config = IMAPConfig(
+            host=req.host,
+            port=req.port,
+            username=req.username,
+            password=req.password,
+            use_ssl=req.use_ssl,
+        )
+        client = IMAPClient(imap_config)
+        client.connect()
+        
+        folders = client.get_folders()
+        client.disconnect()
+        
+        return {
+            "success": True,
+            "message": f"Connected successfully! Found {len(folders)} folders.",
+            "folders": [{"name": f.name, "flags": list(f.flags) if f.flags else []} for f in folders[:10]]
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/test/llm")
+async def test_llm_connection(req: TestLLMRequest):
+    parser: LLMParser | None = None
+    try:
+        llm_config = LLMConfig(
+            provider=req.provider,
+            api_key=req.api_key,
+            model=req.model,
+            base_url=req.base_url,
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+            system_prompt="You are a test assistant. Return 'OK' if you receive this message.",
+        )
+        parser = LLMParser(llm_config)
+        
+        await parser.parse_event("Test email", "This is a test message.")
+        await parser.close()
+        
+        return {
+            "success": True,
+            "message": "LLM connection successful!",
+            "model": req.model,
+        }
+    except Exception as e:
+        if parser:
+            try:
+                await parser.close()
+            except Exception:
+                pass
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/test/caldav")
+async def test_caldav_connection(req: TestCalDAVRequest):
+    try:
+        caldav_config = CalDAVConfig(
+            server_url=req.server_url,
+            username=req.username,
+            password=req.password,
+            calendar_id="",
+            verify_ssl=req.verify_ssl,
+        )
+        client = CalDAVClient(caldav_config)
+        client.connect()
+        
+        calendars = client.get_calendars()
+        client.disconnect()
+        
+        return {
+            "success": True,
+            "message": f"Connected successfully! Found {len(calendars)} calendars.",
+            "calendars": [{"id": c["id"], "name": c["name"]} for c in calendars]
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @app.post("/api/calendars")
