@@ -90,8 +90,8 @@ class TestCalDAVClient:
             all_day=True,
         )
         ics = caldav_client._create_ics(event)
-        assert "DTSTART:20240115" in ics
-        assert "DTEND:20240116" in ics
+        assert "DTSTART;VALUE=DATE:20240115" in ics
+        assert "DTEND;VALUE=DATE:20240116" in ics
 
     def test_create_ics_timed_event(self, caldav_client):
         event = CalendarEvent(

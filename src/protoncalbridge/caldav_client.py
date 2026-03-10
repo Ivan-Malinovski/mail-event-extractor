@@ -2,13 +2,14 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import caldav
 from caldav.lib.error import NotFoundError
 
 from protoncalbridge.exceptions import CalDAVAuthenticationError, CalDAVError
 from protoncalbridge.llm_parser import CalendarEvent
+from protoncalbridge.retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class CalDAVClient:
             for cal in calendars
         ]
 
+    @with_retry(max_attempts=3, base_delay=1.0, exceptions=(CalDAVError,))
     def create_event(self, event: CalendarEvent, uid: str | None = None) -> str:
         if not self._calendar:
             raise CalDAVError("Not connected to CalDAV")
@@ -122,27 +124,24 @@ class CalDAVClient:
             raise CalDAVError(f"Failed to delete event: {e}") from e
 
     def _create_ics(self, event: CalendarEvent, uid: str | None = None) -> str:
-        uid = uid or f"protoncalbridge-{datetime.utcnow().timestamp()}"
+        import time
+        uid = uid or f"protoncalbridge-{time.time()}"
+
+        if not event.start_time:
+            raise CalDAVError("Cannot create event without start_time")
 
         if event.all_day:
             dtstart = "DTSTART;VALUE=DATE:" + event.start_time.strftime("%Y%m%d")
             if event.end_time:
                 dtend = "DTEND;VALUE=DATE:" + event.end_time.strftime("%Y%m%d")
             else:
-                from datetime import timedelta
                 dtend = "DTEND;VALUE=DATE:" + (event.start_time + timedelta(days=1)).strftime("%Y%m%d")
         else:
-            if event.start_time:
-                dtstart = "DTSTART:" + event.start_time.strftime("%Y%m%dT%H%M%S") + "Z"
-            else:
-                dtstart = ""
+            dtstart = "DTSTART:" + event.start_time.strftime("%Y%m%dT%H%M%S") + "Z"
             if event.end_time:
                 dtend = "DTEND:" + event.end_time.strftime("%Y%m%dT%H%M%S") + "Z"
-            elif event.start_time:
-                from datetime import timedelta
-                dtend = "DTEND:" + (event.start_time + timedelta(hours=1)).strftime("%Y%m%dT%H%M%S") + "Z"
             else:
-                dtend = ""
+                dtend = "DTEND:" + (event.start_time + timedelta(hours=1)).strftime("%Y%m%dT%H%M%S") + "Z"
 
         lines = [
             "BEGIN:VCALENDAR",

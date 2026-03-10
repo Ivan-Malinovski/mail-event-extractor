@@ -1,8 +1,9 @@
 """FastAPI application with web UI and API endpoints."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -14,10 +15,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from protoncalbridge.caldav_client import CalDAVClient, CalDAVConfig
 from protoncalbridge.config import settings
 from protoncalbridge.config_manager import ConfigManager
+from protoncalbridge.config_service import (
+    build_caldav_config,
+    build_filter_config,
+    build_imap_config,
+    build_llm_config,
+    build_processing_config,
+    build_scheduler_config,
+    ensure_events_times,
+)
 from protoncalbridge.database import Email, async_session, init_db
 from protoncalbridge.imap_client import IMAPClient, IMAPConfig
-from protoncalbridge.llm_parser import LLMConfig, LLMParser
-from protoncalbridge.scheduler import FilterConfig, Poller, ProcessingConfig
+from protoncalbridge.llm_parser import (
+    CalendarEvent,
+    LLMConfig,
+    LLMParser,
+    events_to_dict_list,
+)
+from protoncalbridge.scheduler import Poller
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
@@ -25,21 +40,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-poller: Poller | None = None
+
+class AppState:
+    poller: Poller | None = None
+    restart_task: asyncio.Task | None = None
+
+
+app_state = AppState()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global poller
     await init_db()
     logger.info("Database initialized")
     yield
-    if poller:
-        await poller.stop()
+    if app_state.poller:
+        await app_state.poller.stop()
 
 
 app = FastAPI(title="ProtonCalBridge", lifespan=lifespan)
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=Path(__file__).parent.parent.parent / "templates")
 
 
 class ConfigUpdate(BaseModel):
@@ -132,11 +152,49 @@ async def delete_history(email_id: int, session: AsyncSession = Depends(get_sess
     return {"status": "ok"}
 
 
+async def _parse_email_with_llm(
+    subject: str,
+    body_text: str,
+    config: dict,
+) -> tuple[list[CalendarEvent] | None, dict]:
+    llm_config = build_llm_config(config)
+    if not llm_config:
+        return None, {"error": "LLM not configured"}
+
+    parser = LLMParser(llm_config)
+    try:
+        events = await parser.parse_event(
+            email_subject=subject,
+            email_body=body_text,
+        )
+        return events, {"parsed": True}
+    except Exception as e:
+        return None, {"error": str(e)}
+    finally:
+        await parser.close()
+
+
+async def _create_caldav_event(
+    event: CalendarEvent,
+    config: dict,
+) -> tuple[str | None, str]:
+    caldav_config = build_caldav_config(config)
+    if not caldav_config:
+        return None, "caldav_not_configured"
+
+    client = CalDAVClient(caldav_config)
+    client.connect()
+    try:
+        event_id = client.create_event(event)
+        return str(event_id) if event_id else None, "created"
+    except Exception as e:
+        return None, str(e)
+    finally:
+        client.disconnect()
+
+
 @app.post("/api/history/{email_id}/reprocess")
 async def reprocess_email(email_id: int, session: AsyncSession = Depends(get_session)):
-    from protoncalbridge.caldav_client import CalDAVClient, CalDAVConfig
-    from protoncalbridge.llm_parser import LLMConfig, LLMParser
-
     result = await session.execute(select(Email).where(Email.id == email_id))
     email = result.scalar_one_or_none()
     if not email:
@@ -144,84 +202,43 @@ async def reprocess_email(email_id: int, session: AsyncSession = Depends(get_ses
 
     config = await ConfigManager.get_config()
 
-    llm_config = None
-    llm_data = config.get("llm", {})
-    if llm_data.get("api_key"):
-        llm_config = LLMConfig(
-            provider=llm_data.get("provider", "openai"),
-            api_key=llm_data.get("api_key", ""),
-            model=llm_data.get("model", "gpt-4o-mini"),
-            base_url=llm_data.get("base_url"),
-            temperature=llm_data.get("temperature", 0.0),
-            max_tokens=llm_data.get("max_tokens", 1000),
-            system_prompt=llm_data.get("system_prompt", ""),
-        )
-
-    if not llm_config:
-        return {"success": False, "error": "LLM not configured"}
-
     email.status = "pending"
     await session.commit()
 
-    parser = LLMParser(llm_config)
-    try:
-        logger.info(f"Using LLM config - provider: {llm_config.provider}, model: {llm_config.model}")
-        event = await parser.parse_event(
-            email_subject=email.subject,
-            email_body=email.body_text or "",
-        )
+    events, llm_response = await _parse_email_with_llm(
+        subject=email.subject,
+        body_text=email.body_text or "",
+        config=config,
+    )
 
-        def event_to_dict(e):
-            if not e:
-                return None
-            d = {}
-            for k, v in e.__dict__.items():
-                if isinstance(v, datetime):
-                    d[k] = v.isoformat()
-                else:
-                    d[k] = v
-            return d
-
-        email.event_data = event_to_dict(event)
-        email.llm_response = {"parsed": True, "event": email.event_data}
-
-        if event:
-            if not event.start_time:
-                from datetime import date
-                event.start_time = datetime.combine(date.today(), datetime.min.time())
-                event.end_time = event.start_time
-                event.all_day = True
-
-            caldav_data = config.get("caldav", {})
-            if caldav_data.get("server_url"):
-                caldav_config = CalDAVConfig(
-                    server_url=caldav_data.get("server_url", ""),
-                    username=caldav_data.get("username", ""),
-                    password=caldav_data.get("password", ""),
-                    calendar_id=caldav_data.get("calendar_id", ""),
-                    verify_ssl=caldav_data.get("verify_ssl", True),
-                )
-                client = CalDAVClient(caldav_config)
-                client.connect()
-                try:
-                    event_id = client.create_event(event)
-                    email.caldav_event_id = str(event_id) if event_id else None
-                    email.status = "created"
-                except Exception as e:
-                    email.status = "caldav_error"
-                    email.llm_response["caldav_error"] = str(e)
-                finally:
-                    client.disconnect()
-            else:
-                email.status = "parsed"
-        else:
-            email.status = "rejected"
-
-    except Exception as e:
+    if not events:
         email.status = "llm_error"
-        email.llm_response = {"error": str(e)}
-    finally:
-        await parser.close()
+        email.llm_response = llm_response
+        await session.commit()
+        return {"success": False, "error": llm_response.get("error", "LLM parsing failed")}
+
+    email.event_data = events_to_dict_list(events)
+    email.llm_response = llm_response
+
+    events = ensure_events_times(events)
+
+    created_ids = []
+    errors = []
+    for event in events:
+        event_id, status = await _create_caldav_event(event, config)
+        if event_id:
+            created_ids.append(event_id)
+        else:
+            errors.append(status)
+
+    if created_ids:
+        email.caldav_event_id = ",".join(str(id) for id in created_ids)
+        email.status = "created"
+    elif errors and "caldav_not_configured" in errors:
+        email.status = "caldav_not_configured"
+    else:
+        email.status = "caldav_error"
+        email.llm_response["caldav_errors"] = errors
 
     await session.commit()
     await session.refresh(email)
@@ -245,39 +262,26 @@ async def preview_emails():
     try:
         config = await ConfigManager.get_config()
 
-        imap_config = IMAPConfig(
-            host=config.get("imap", {}).get("host", "127.0.0.1"),
-            port=config.get("imap", {}).get("port", 1143),
-            username=config.get("imap", {}).get("username", ""),
-            password=config.get("imap", {}).get("password", ""),
-            use_ssl=config.get("imap", {}).get("use_ssl", True),
-        )
-
-        filter_config = FilterConfig(
-            folders=config.get("filter", {}).get("folders", ["INBOX"]),
-            keywords=config.get("filter", {}).get("keywords", []),
-            keywords_regex=config.get("filter", {}).get("keywords_regex", []),
-            senders=config.get("filter", {}).get("senders", []),
-            senders_regex=config.get("filter", {}).get("senders_regex", []),
-            recipients=config.get("filter", {}).get("recipients", []),
-            recipients_regex=config.get("filter", {}).get("recipients_regex", []),
-            include_attachments=config.get("filter", {}).get("include_attachments", False),
-            unread_only=config.get("filter", {}).get("unread_only", True),
-            date_since_days=config.get("filter", {}).get("date_since_days"),
-        )
+        imap_config = build_imap_config(config)
+        filter_config = build_filter_config(config)
 
         client = IMAPClient(imap_config)
         client.connect()
 
-        emails = client.fetch_emails(
-            folder=filter_config.folders[0] if filter_config.folders else "INBOX",
-            keywords=filter_config.keywords,
-            senders=filter_config.senders,
-            recipients=filter_config.recipients,
-            unread_only=filter_config.unread_only,
-            include_attachments=filter_config.include_attachments,
-            date_since_days=filter_config.date_since_days,
-        )
+        folders = filter_config.folders if filter_config.folders else ["INBOX"]
+        all_emails = []
+
+        for folder in folders:
+            emails = client.fetch_emails(
+                folder=folder,
+                keywords=filter_config.keywords,
+                senders=filter_config.senders,
+                recipients=filter_config.recipients,
+                unread_only=filter_config.unread_only,
+                include_attachments=filter_config.include_attachments,
+                date_since_days=filter_config.date_since_days,
+            )
+            all_emails.extend(emails)
 
         client.disconnect()
 
@@ -288,7 +292,7 @@ async def preview_emails():
                 "sender": e.sender,
                 "date": e.date.isoformat() if e.date else None,
             }
-            for e in emails
+            for e in all_emails
         ]
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -297,39 +301,35 @@ async def preview_emails():
 @app.post("/api/emails/test-parse")
 async def test_parse_email(req: TestParseRequest):
     config = await ConfigManager.get_config()
-    llm_config_data = config.get("llm", {})
+    llm_config = build_llm_config(config)
 
-    if not llm_config_data.get("api_key"):
+    if not llm_config:
         raise HTTPException(status_code=400, detail="LLM API key not configured")
 
-    llm_config = LLMConfig(
-        provider=llm_config_data.get("provider", "openai"),
-        api_key=llm_config_data.get("api_key", ""),
-        model=llm_config_data.get("model", "gpt-4o-mini"),
-        base_url=llm_config_data.get("base_url"),
-        temperature=llm_config_data.get("temperature", 0.0),
-        max_tokens=llm_config_data.get("max_tokens", 1000),
-        system_prompt=llm_config_data.get("system_prompt", ""),
+    events, llm_response = await _parse_email_with_llm(
+        subject=req.subject,
+        body_text=req.body,
+        config=config,
     )
 
-    parser = LLMParser(llm_config)
-    try:
-        event = await parser.parse_event(req.subject, req.body)
-        return {
-            "success": True,
-            "event": {
-                "title": event.title,
-                "start_time": event.start_time.isoformat() if event.start_time else None,
-                "end_time": event.end_time.isoformat() if event.end_time else None,
-                "location": event.location,
-                "description": event.description,
-                "all_day": event.all_day,
-            },
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-    finally:
-        await parser.close()
+    if not events:
+        return {"success": False, "error": llm_response.get("error", "Parsing failed")}
+
+    return {
+        "success": True,
+        "events": [
+            {
+                "title": e.title,
+                "start_time": e.start_time.isoformat() if e.start_time else None,
+                "end_time": e.end_time.isoformat() if e.end_time else None,
+                "location": e.location,
+                "description": e.description,
+                "all_day": e.all_day,
+                "task": e.task,
+            }
+            for e in events
+        ],
+    }
 
 
 @app.post("/api/test/imap")
@@ -453,6 +453,71 @@ async def test_llm_connection(req: TestLLMRequest):
         return {"success": False, "error": str(e)}
 
 
+class FetchModelsRequest(BaseModel):
+    provider: str
+    api_key: str
+    base_url: str | None = None
+
+
+@app.post("/api/llm/models")
+async def fetch_models(req: FetchModelsRequest):
+    import httpx
+
+    base_url = req.base_url or ""
+    headers = {"Authorization": f"Bearer {req.api_key}"}
+
+    try:
+        if req.provider == "openai":
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://api.openai.com/v1/models",
+                    headers=headers,
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                models = [m["id"] for m in data.get("data", [])]
+                return {"success": True, "models": models}
+        elif req.provider == "anthropic":
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={"x-api-key": req.api_key},
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                models = [m["id"] for m in data.get("data", [])]
+                return {"success": True, "models": models}
+        elif req.provider == "ollama":
+            url = base_url or "http://localhost:11434"
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{url}/api/tags", timeout=30.0)
+                resp.raise_for_status()
+                data = resp.json()
+                models = [m["name"] for m in data.get("models", [])]
+                return {"success": True, "models": models}
+        elif req.provider == "openai-compatible":
+            if not base_url:
+                raise HTTPException(status_code=400, detail="Base URL required for OpenAI-compatible provider")
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{base_url}/api/v1/models",
+                    headers={"Authorization": f"Bearer {req.api_key}"} if req.api_key else {},
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                models = [m["id"] for m in data.get("data", [])]
+                return {"success": True, "models": models}
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported provider: {req.provider}")
+    except httpx.HTTPStatusError as e:
+        return {"success": False, "error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/test/caldav")
 async def test_caldav_connection(req: TestCalDAVRequest):
     try:
@@ -531,77 +596,20 @@ async def health():
     return {"status": "healthy"}
 
 
-async def restart_poller():
-    global poller
-    if poller:
-        await poller.stop()
+async def _do_restart_poller():
+    if app_state.poller:
+        await app_state.poller.stop()
 
     config = await ConfigManager.get_config()
 
-    imap_data = config.get("imap", {})
-    filter_data = config.get("filter", {})
-    llm_data = config.get("llm", {})
-    caldav_data = config.get("caldav", {})
-    processing_data = config.get("processing", {})
-    scheduler_data = config.get("scheduler", {})
+    imap_config = build_imap_config(config)
+    filter_config = build_filter_config(config)
+    llm_config = build_llm_config(config)
+    caldav_config = build_caldav_config(config)
+    processing_config = build_processing_config(config)
+    scheduler_config = build_scheduler_config(config)
 
-    imap_config = IMAPConfig(
-        host=imap_data.get("host", "127.0.0.1"),
-        port=imap_data.get("port", 1143),
-        username=imap_data.get("username", ""),
-        password=imap_data.get("password", ""),
-        use_ssl=imap_data.get("use_ssl", True),
-    )
-
-    filter_config = FilterConfig(
-        folders=filter_data.get("folders", ["INBOX"]),
-        keywords=filter_data.get("keywords", []),
-        keywords_regex=filter_data.get("keywords_regex", []),
-        senders=filter_data.get("senders", []),
-        senders_regex=filter_data.get("senders_regex", []),
-        recipients=filter_data.get("recipients", []),
-        recipients_regex=filter_data.get("recipients_regex", []),
-        include_attachments=filter_data.get("include_attachments", False),
-        unread_only=filter_data.get("unread_only", True),
-        date_since_days=filter_data.get("date_since_days"),
-    )
-
-    llm_config = None
-    if llm_data.get("api_key"):
-        llm_config = LLMConfig(
-            provider=llm_data.get("provider", "openai"),
-            api_key=llm_data.get("api_key", ""),
-            model=llm_data.get("model", "gpt-4o-mini"),
-            base_url=llm_data.get("base_url"),
-            temperature=llm_data.get("temperature", 0.0),
-            max_tokens=llm_data.get("max_tokens", 1000),
-            system_prompt=llm_data.get("system_prompt", ""),
-        )
-
-    caldav_config = None
-    if caldav_data.get("server_url"):
-        caldav_config = CalDAVConfig(
-            server_url=caldav_data.get("server_url", ""),
-            username=caldav_data.get("username", ""),
-            password=caldav_data.get("password", ""),
-            calendar_id=caldav_data.get("calendar_id", ""),
-            verify_ssl=caldav_data.get("verify_ssl", True),
-        )
-
-    processing_config = ProcessingConfig(
-        auto_create=processing_data.get("auto_create", True),
-        update_existing=processing_data.get("update_existing", True),
-        delete_rejected=processing_data.get("delete_rejected", False),
-        grace_period_minutes=processing_data.get("grace_period_minutes", 0),
-    )
-
-    scheduler_config = type("SchedulerConfig", (), {
-        "check_interval_minutes": scheduler_data.get("check_interval_minutes", 5),
-        "active_hours_start": scheduler_data.get("active_hours_start"),
-        "active_hours_end": scheduler_data.get("active_hours_end"),
-    })()
-
-    poller = Poller(
+    app_state.poller = Poller(
         imap_config=imap_config,
         filter_config=filter_config,
         llm_config=llm_config,
@@ -610,7 +618,22 @@ async def restart_poller():
         scheduler_config=scheduler_config,
     )
 
-    await poller.start()
+    await app_state.poller.start()
+
+
+async def restart_poller():
+    if app_state.restart_task:
+        app_state.restart_task.cancel()
+        try:
+            await app_state.restart_task
+        except asyncio.CancelledError:
+            pass
+
+    async def delayed_restart():
+        await asyncio.sleep(2)
+        await _do_restart_poller()
+
+    app_state.restart_task = asyncio.create_task(delayed_restart())
 
 
 if __name__ == "__main__":

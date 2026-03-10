@@ -147,12 +147,24 @@ class IMAPClient:
 
     def _get_text_body(self, msg) -> str | None:
         try:
-            for part in msg.text_parts:
-                if part.content_type == "text/plain":
-                    return part.content
+            if msg.text:
+                return msg.text
+            if msg.html:
+                return self._strip_html(msg.html)
         except Exception:
             pass
         return None
+
+    def _strip_html(self, html: str) -> str:
+        import re
+        text = html
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'&[a-zA-Z]+;', ' ', text)
+        text = re.sub(r'&#\d+;', ' ', text)
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
 
     def _get_html_body(self, msg) -> str | None:
         try:

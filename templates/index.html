@@ -47,6 +47,24 @@
         .tab-content.active { display: block; }
         .alert { padding: 15px; border-radius: 4px; margin-bottom: 15px; }
         .alert-info { background: #cce5ff; color: #004085; }
+        .toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+        .toast { padding: 12px 24px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); font-size: 14px; animation: toastIn 0.3s ease; min-width: 200px; text-align: center; }
+        .toast.success { background: #28a745; color: #fff; }
+        .toast.error { background: #dc3545; color: #fff; }
+        .toast.info { background: #17a2b8; color: #fff; }
+        .toast:hover { animation: none; }
+        @keyframes toastIn { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+        .btn { position: relative; }
+        .btn.loading { pointer-events: none; opacity: 0.7; }
+        .btn.success { background: #28a745 !important; }
+        .btn.error { background: #dc3545 !important; }
+        .btn .spinner { display: none; width: 14px; height: 14px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; position: absolute; left: 8px; top: 50%; margin-top: -7px; }
+        .btn.loading .spinner { display: inline-block; }
+        .btn.success::after { content: " ✓"; }
+        .btn.error::after { content: " ✗"; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .folder-search { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; font-size: 14px; }
+        .help-text { font-size: 12px; color: #666; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -54,15 +72,9 @@
         <header>
             <h1>ProtonCalBridge</h1>
             <p>Bridge Proton Bridge (IMAP) to CalDAV with LLM parsing</p>
-            <div class="nav">
-                <a href="#" onclick="showTab('settings')">Settings</a>
-                <a href="#" onclick="showTab('preview')">Preview Emails</a>
-                <a href="#" onclick="showTab('history')">History</a>
-                <a href="#" onclick="showTab('test')">Test Parser</a>
-            </div>
         </header>
 
-        <div id="status"></div>
+        <div id="toast-container" class="toast-container"></div>
 
         <div class="tabs">
             <div class="tab active" onclick="showTab('settings')">Settings</div>
@@ -183,7 +195,10 @@
                         </div>
                         <div class="form-group">
                             <label>Model</label>
-                            <input type="text" name="model" value="{{ config.llm.model }}">
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" name="model" value="{{ config.llm.model }}" style="flex: 1;">
+                                <button type="button" class="btn btn-secondary" onclick="fetchModels()">Fetch Models</button>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>API Key</label>
@@ -270,6 +285,7 @@
                     <div class="form-group">
                         <label>Grace period (minutes)</label>
                         <input type="number" name="grace_period_minutes" value="{{ config.processing.grace_period_minutes }}">
+                        <p class="help-text">Events will be created automatically after this delay, giving you time to review and reject them in the History tab. Set to 0 for immediate creation.</p>
                     </div>
                     <button type="submit" class="btn btn-primary">Save Processing Settings</button>
                 </form>
@@ -361,10 +377,37 @@
             document.getElementById(tabId).classList.add('active');
         }
 
+        function showToast(message, type = 'info', duration = 5000) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            
+            let timeout;
+            const startTimer = () => { timeout = setTimeout(() => removeToast(), duration); };
+            const removeToast = () => {
+                clearTimeout(timeout);
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-20px)';
+                toast.style.transition = 'all 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            };
+            
+            toast.addEventListener('mouseenter', () => { clearTimeout(timeout); });
+            toast.addEventListener('mouseleave', startTimer);
+            startTimer();
+        }
+
+        function setButtonState(btn, state) {
+            btn.classList.remove('loading', 'success', 'error');
+            if (state) {
+                btn.classList.add(state);
+            }
+        }
+
         function showStatus(message, type) {
-            const status = document.getElementById('status');
-            status.innerHTML = `<div class="status ${type}">${message}</div>`;
-            setTimeout(() => status.innerHTML = '', 5000);
+            showToast(message, type === 'error' ? 'error' : type === 'success' ? 'success' : 'info');
         }
 
         async function saveConfig(section, form) {
@@ -429,24 +472,33 @@
         document.getElementById('processing-form').onsubmit = (e) => { e.preventDefault(); saveConfig('processing', e.target); };
         document.getElementById('web-form').onsubmit = (e) => { e.preventDefault(); saveConfig('web', e.target); };
 
-        async function previewEmails() {
+        async function previewEmails(btn) {
+            if (!btn) btn = event?.target;
+            setButtonState(btn, 'loading');
             try {
                 const res = await fetch('/api/emails/preview');
                 if (!res.ok) {
                     const err = await res.text();
+                    setButtonState(btn, 'error');
                     showStatus('Preview error: ' + err, 'error');
+                    setTimeout(() => setButtonState(btn, null), 5000);
                     return;
                 }
                 const emails = await res.json();
                 const container = document.getElementById('preview-results');
                 if (emails.length === 0) {
+                    setButtonState(btn, null);
                     container.innerHTML = '<p style="padding:10px;">No emails match current filters. Try adjusting keywords or disabling "unread only".</p>';
                     return;
                 }
+                setButtonState(btn, 'success');
                 container.innerHTML = `<table><tr><th>Subject</th><th>Sender</th><th>Date</th></tr>${emails.map(e => `<tr><td>${e.subject}</td><td>${e.sender}</td><td>${e.date || 'N/A'}</td></tr>`).join('')}</table>`;
+                setTimeout(() => setButtonState(btn, null), 3000);
             } catch (e) {
                 console.error('Preview error:', e);
+                setButtonState(btn, 'error');
                 showStatus('Error loading preview: ' + e.message, 'error');
+                setTimeout(() => setButtonState(btn, null), 5000);
             }
         }
 
@@ -468,7 +520,7 @@
                         details = e.event_data.title;
                     }
                     const reprocessBtn = (e.status === 'llm_error' || e.status === 'caldav_error' || e.status === 'rejected' || e.status === 'pending') ? 
-                        `<button onclick="reprocessEmail(${e.id})" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 5px;">Re-process</button>` : '';
+                        `<button onclick="reprocessEmail(${e.id}, this)" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 5px;">Re-process</button>` : '';
                     const deleteBtn = `<button onclick="deleteEmail(${e.id})" class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;">Delete</button>`;
                     return `<tr><td>${e.subject}</td><td>${e.sender}</td><td><span class="badge badge-${e.status}">${e.status}</span></td><td>${details}</td><td>${reprocessBtn}${deleteBtn}</td></tr>`;
                 }).join('')}</table>`;
@@ -477,18 +529,26 @@
             }
         }
 
-        async function reprocessEmail(emailId) {
+        async function reprocessEmail(emailId, btn) {
+            if (!btn) btn = event?.target;
+            setButtonState(btn, 'loading');
             try {
                 const res = await fetch('/api/history/' + emailId + '/reprocess', {method: 'POST'});
                 const result = await res.json();
                 if (result.success) {
+                    setButtonState(btn, result.status === 'created' ? 'success' : 'error');
                     showStatus('Re-processed! Status: ' + result.status, result.status === 'created' ? 'success' : 'error');
+                    setTimeout(() => setButtonState(btn, null), result.status === 'created' ? 3000 : 5000);
                     loadHistory();
                 } else {
+                    setButtonState(btn, 'error');
                     showStatus('Error: ' + result.error, 'error');
+                    setTimeout(() => setButtonState(btn, null), 5000);
                 }
             } catch (e) {
+                setButtonState(btn, 'error');
                 showStatus('Error: ' + e.message, 'error');
+                setTimeout(() => setButtonState(btn, null), 5000);
             }
         }
 
@@ -509,8 +569,10 @@
 
         document.getElementById('test-form').onsubmit = async (e) => {
             e.preventDefault();
+            const btn = e.target.querySelector('button[type="submit"]');
             const subject = document.getElementById('test-subject').value;
             const body = document.getElementById('test-body').value;
+            setButtonState(btn, 'loading');
             try {
                 const res = await fetch('/api/emails/test-parse', {
                     method: 'POST',
@@ -520,14 +582,112 @@
                 const result = await res.json();
                 const container = document.getElementById('test-results');
                 if (result.success) {
-                    container.innerHTML = `<div class="alert alert-info"><strong>Parsed Event:</strong><br>Title: ${result.event.title}<br>Start: ${result.event.start_time || 'N/A'}<br>End: ${result.event.end_time || 'N/A'}<br>Location: ${result.event.location || 'N/A'}</div>`;
+                    setButtonState(btn, 'success');
+                    const eventsHtml = result.events.map(e => `
+                        <div class="alert alert-info" style="margin-bottom: 10px;">
+                            <strong>${e.task ? '📋 Task: ' : '📅 Event: '}${e.title}</strong><br>
+                            Start: ${e.start_time || 'N/A'}<br>
+                            End: ${e.end_time || 'N/A'}<br>
+                            Location: ${e.location || 'N/A'}<br>
+                            All-day: ${e.all_day ? 'Yes' : 'No'}
+                        </div>
+                    `).join('');
+                    container.innerHTML = eventsHtml;
+                    setTimeout(() => setButtonState(btn, null), 3000);
                 } else {
+                    setButtonState(btn, 'error');
                     container.innerHTML = `<div class="alert alert-info">${result.error}</div>`;
+                    setTimeout(() => setButtonState(btn, null), 5000);
                 }
             } catch (e) {
+                setButtonState(btn, 'error');
                 showStatus('Error: ' + e.message, 'error');
+                setTimeout(() => setButtonState(btn, null), 5000);
             }
         };
+
+        async function fetchModels() {
+            const btn = event.target;
+            const form = document.getElementById('llm-form');
+            const data = {
+                provider: form.querySelector('[name="provider"]').value,
+                api_key: form.querySelector('[name="api_key"]').value,
+                base_url: form.querySelector('[name="base_url"]').value || null
+            };
+            
+            if (!data.api_key) {
+                showStatus('Please enter an API key first', 'error');
+                return;
+            }
+            
+            setButtonState(btn, 'loading');
+            try {
+                const res = await fetch('/api/llm/models', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if (result.success) {
+                    setButtonState(btn, 'success');
+                    setTimeout(() => setButtonState(btn, null), 3000);
+                    if (result.models && result.models.length > 0) {
+                        showModelPicker(result.models);
+                    } else {
+                        showStatus('No models found', 'info');
+                    }
+                } else {
+                    setButtonState(btn, 'error');
+                    const errMsg = result.error || result.message || 'Unknown error';
+                    showStatus('Error fetching models: ' + errMsg, 'error');
+                    setTimeout(() => setButtonState(btn, null), 5000);
+                }
+            } catch (e) {
+                setButtonState(btn, 'error');
+                showStatus('Error: ' + e.message, 'error');
+                setTimeout(() => setButtonState(btn, null), 5000);
+            }
+        }
+
+        function showModelPicker(models) {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = 'background:#fff;border-radius:8px;padding:20px;width:90%;max-width:500px;max-height:80vh;display:flex;flex-direction:column;';
+            
+            modal.innerHTML = `
+                <h3 style="margin-bottom:15px;">Select Model</h3>
+                <input type="text" id="model-search" placeholder="Search models..." style="padding:10px;border:1px solid #ddd;border-radius:4px;margin-bottom:10px;font-size:14px;">
+                <div id="model-list" style="flex:1;overflow-y:auto;border:1px solid #ddd;border-radius:4px;max-height:300px;">
+                    ${models.map(m => `<div class="model-option" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #eee;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='#fff'" onclick="selectModel('${m.replace(/'/g, "\\'")}')">${m}</div>`).join('')}
+                </div>
+                <div style="margin-top:15px;display:flex;gap:10px;justify-content:flex-end;">
+                    <button class="btn btn-secondary" onclick="this.closest('.toast-container').querySelector('.toast')?.closest('[style*=\'position:fixed\']')?.remove();overlay.remove()">Cancel</button>
+                </div>
+            `;
+            
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+            
+            document.getElementById('model-search').addEventListener('keyup', (e) => {
+                const term = e.target.value.toLowerCase();
+                document.querySelectorAll('.model-option').forEach(opt => {
+                    opt.style.display = opt.textContent.toLowerCase().includes(term) ? '' : 'none';
+                });
+            });
+            
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) overlay.remove();
+            });
+        }
+
+        function selectModel(modelName) {
+            const form = document.getElementById('llm-form');
+            form.querySelector('[name="model"]').value = modelName;
+            document.querySelectorAll('[style*="position:fixed"][style*="z-index:10000"]').forEach(el => el.remove());
+            showStatus('Selected: ' + modelName, 'success');
+        }
 
         async function fetchCalendars() {
             try {
@@ -540,6 +700,7 @@
         }
 
         async function testIMAP() {
+            const btn = event.target;
             console.log("Testing IMAP connection...");
             const form = document.getElementById('imap-form');
             if (!form) {
@@ -561,8 +722,8 @@
                 return;
             }
             
+            setButtonState(btn, 'loading');
             try {
-                showStatus('Testing IMAP connection...', 'success');
                 const res = await fetch('/api/test/imap', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -571,17 +732,24 @@
                 const result = await res.json();
                 console.log("IMAP result:", result);
                 if (result.success) {
+                    setButtonState(btn, 'success');
                     showStatus('IMAP Connection Successful! ' + result.message, 'success');
+                    setTimeout(() => setButtonState(btn, null), 3000);
                 } else {
+                    setButtonState(btn, 'error');
                     showStatus('IMAP Connection Failed: ' + result.error, 'error');
+                    setTimeout(() => setButtonState(btn, null), 5000);
                 }
             } catch (e) {
                 console.error("IMAP error:", e);
+                setButtonState(btn, 'error');
                 showStatus('Error: ' + e.message, 'error');
+                setTimeout(() => setButtonState(btn, null), 5000);
             }
         }
 
         async function testLLM() {
+            const btn = event.target;
             console.log("Testing LLM connection...");
             const form = document.getElementById('llm-form');
             if (!form) {
@@ -602,9 +770,9 @@
                 return;
             }
             
+            setButtonState(btn, 'loading');
             try {
                 console.log("Testing LLM with:", data.model, data.provider);
-                showStatus('Testing LLM connection...', 'success');
                 const res = await fetch('/api/test/llm', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -613,17 +781,24 @@
                 const result = await res.json();
                 console.log("LLM result:", result);
                 if (result.success) {
+                    setButtonState(btn, 'success');
                     showStatus('LLM Connection Successful! ' + result.message, 'success');
+                    setTimeout(() => setButtonState(btn, null), 3000);
                 } else {
+                    setButtonState(btn, 'error');
                     showStatus('LLM Connection Failed: ' + result.error, 'error');
+                    setTimeout(() => setButtonState(btn, null), 5000);
                 }
             } catch (e) {
                 console.error("LLM error:", e);
+                setButtonState(btn, 'error');
                 showStatus('Error: ' + e.message, 'error');
+                setTimeout(() => setButtonState(btn, null), 5000);
             }
         }
 
         async function testCalDAV() {
+            const btn = event.target;
             const form = document.getElementById('caldav-form');
             const data = {
                 server_url: form.querySelector('[name="server_url"]').value,
@@ -637,9 +812,9 @@
                 return;
             }
             
+            setButtonState(btn, 'loading');
             try {
                 console.log("Testing CalDAV with:", data.server_url);
-                showStatus('Testing CalDAV connection...', 'success');
                 const res = await fetch('/api/test/caldav', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -648,13 +823,19 @@
                 const result = await res.json();
                 console.log("CalDAV result:", result);
                 if (result.success) {
+                    setButtonState(btn, 'success');
                     showStatus('CalDAV Connection Successful! ' + result.message, 'success');
+                    setTimeout(() => setButtonState(btn, null), 3000);
                 } else {
+                    setButtonState(btn, 'error');
                     showStatus('CalDAV Connection Failed: ' + result.error, 'error');
+                    setTimeout(() => setButtonState(btn, null), 5000);
                 }
             } catch (e) {
                 console.error("CalDAV error:", e);
+                setButtonState(btn, 'error');
                 showStatus('Error: ' + e.message, 'error');
+                setTimeout(() => setButtonState(btn, null), 5000);
             }
         }
 
@@ -684,10 +865,11 @@
                     const container = document.getElementById('folder-checkboxes');
                     const currentFolders = (container.querySelector('[name="folders"]')?.value || 'INBOX').split(',').map(f => f.trim()).filter(f => f);
                     
-                    let html = '<div style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">';
+                    let html = '<input type="text" class="folder-search" placeholder="Search folders..." onkeyup="filterFolders(this.value)">';
+                    html += '<div id="folder-list" style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">';
                     result.folders.forEach(folder => {
                         const checked = currentFolders.includes(folder.name) ? 'checked' : '';
-                        html += `<div class="checkbox-group" style="margin-bottom: 5px;">
+                        html += `<div class="folder-item checkbox-group" style="margin-bottom: 5px;">
                             <input type="checkbox" class="folder-checkbox" value="${folder.name}" ${checked} onchange="updateFolderInput()">
                             <label>${folder.name}</label>
                         </div>`;
@@ -702,6 +884,15 @@
             } catch (e) {
                 showStatus('Error: ' + e.message, 'error');
             }
+        }
+
+        function filterFolders(searchTerm) {
+            const items = document.querySelectorAll('.folder-item');
+            const term = searchTerm.toLowerCase();
+            items.forEach(item => {
+                const label = item.querySelector('label').textContent.toLowerCase();
+                item.style.display = label.includes(term) ? '' : 'none';
+            });
         }
 
         function updateFolderInput() {

@@ -12,7 +12,12 @@ from protoncalbridge.caldav_client import CalDAVClient, CalDAVConfig
 from protoncalbridge.database import Email, async_session
 from protoncalbridge.filter import EmailFilter, FilterConfig
 from protoncalbridge.imap_client import EmailMessage, IMAPClient, IMAPConfig
-from protoncalbridge.llm_parser import CalendarEvent, LLMConfig, LLMParser
+from protoncalbridge.llm_parser import (
+    CalendarEvent,
+    LLMConfig,
+    LLMParser,
+    events_to_dict_list,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,13 +73,33 @@ class Poller:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        if self._imap_client:
-            self._imap_client.disconnect()
+        await self._disconnect_imap()
         if self._llm_parser:
             await self._llm_parser.close()
         if self._caldav_client:
             self._caldav_client.disconnect()
         logger.info("Poller stopped")
+
+    async def _ensure_imap_connected(self) -> None:
+        if self._imap_client is None:
+            self._imap_client = IMAPClient(self.imap_config)
+            await asyncio.to_thread(self._imap_client.connect)
+        else:
+            try:
+                await asyncio.to_thread(self._imap_client._mailbox.noop)
+            except Exception:
+                logger.info("IMAP connection lost, reconnecting...")
+                await self._disconnect_imap()
+                self._imap_client = IMAPClient(self.imap_config)
+                await asyncio.to_thread(self._imap_client.connect)
+
+    async def _disconnect_imap(self) -> None:
+        if self._imap_client:
+            try:
+                self._imap_client.disconnect()
+            except Exception:
+                pass
+            self._imap_client = None
 
     async def _run_loop(self) -> None:
         while self._running:
@@ -94,8 +119,7 @@ class Poller:
 
         folders = self.filter_config.folders if self.filter_config.folders else ["INBOX"]
 
-        self._imap_client = IMAPClient(self.imap_config)
-        await asyncio.to_thread(self._imap_client.connect)
+        await self._ensure_imap_connected()
 
         email_filter = EmailFilter(self.filter_config)
 
@@ -112,9 +136,6 @@ class Poller:
                 date_since_days=self.filter_config.date_since_days,
             )
             all_emails.extend(emails)
-
-        await asyncio.to_thread(self._imap_client.disconnect)
-        self._imap_client = None
 
         if self.llm_config:
             self._llm_parser = LLMParser(self.llm_config)
@@ -157,32 +178,39 @@ class Poller:
             return
 
         try:
-            event = await self._llm_parser.parse_event(
+            events = await self._llm_parser.parse_event(
                 email_subject=email.subject,
                 email_body=email.body_text or "",
             )
 
-            await self._update_email_with_event(session, email.message_id, event)
+            await self._update_email_with_events(session, email.message_id, events)
 
             if self.processing_config.auto_create and self.caldav_config:
-                await self._create_calendar_event(session, email.message_id, event)
+                await self._create_calendar_events(session, email.message_id, events)
 
         except Exception as e:
             logger.error(f"LLM parsing failed for {email.message_id}: {e}")
             await self._update_email_status(session, email.message_id, "llm_error")
 
-    async def _create_calendar_event(
-        self, session: AsyncSession, message_id: str, event: CalendarEvent
+    async def _create_calendar_events(
+        self, session: AsyncSession, message_id: str, events: list[CalendarEvent]
     ) -> None:
         if not self.caldav_config or not self._caldav_client:
             return
 
+        created_ids = []
         try:
-            event_id = self._caldav_client.create_event(event)
-            await self._update_caldav_event_id(session, message_id, str(event_id) if event_id else None)
-            await self._update_email_status(session, message_id, "created")
+            for event in events:
+                event_id = self._caldav_client.create_event(event)
+                if event_id:
+                    created_ids.append(str(event_id))
+            if created_ids:
+                await self._update_caldav_event_id(session, message_id, ",".join(created_ids))
+                await self._update_email_status(session, message_id, "created")
+            else:
+                await self._update_email_status(session, message_id, "caldav_error")
         except Exception as e:
-            logger.error(f"Failed to create calendar event: {e}")
+            logger.error(f"Failed to create calendar events: {e}")
             await self._update_email_status(session, message_id, "caldav_error")
 
     def _is_within_active_hours(self) -> bool:
@@ -225,6 +253,19 @@ class Poller:
             .values(
                 status="parsed",
                 event_data=asdict(event),
+            )
+        )
+        await session.commit()
+
+    async def _update_email_with_events(
+        self, session: AsyncSession, message_id: str, events: list[CalendarEvent]
+    ) -> None:
+        await session.execute(
+            update(Email)
+            .where(Email.message_id == message_id)
+            .values(
+                status="parsed",
+                event_data=events_to_dict_list(events),
             )
         )
         await session.commit()

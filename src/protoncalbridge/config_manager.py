@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from protoncalbridge.database import Config, async_session
 
@@ -217,6 +217,6 @@ class ConfigManager:
     @staticmethod
     async def clear_config() -> None:
         async with async_session() as session:
-            await session.execute("DELETE FROM config")
+            await session.execute(delete(Config))
             await session.commit()
             logger.info("Config cleared")
