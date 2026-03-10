@@ -73,6 +73,40 @@ DEFAULT_CONFIG = {
 }
 
 
+PRESETS: dict = {
+    "meeting": {
+        "name": "Meeting Invites",
+        "keywords": ["meeting", "invite", "invitation", "zoom", "teams", "google meet", "call"],
+        "keywords_regex": [],
+    },
+    "event": {
+        "name": "Calendar Events",
+        "keywords": ["event", "appointment", "reservation", "booking"],
+        "keywords_regex": [],
+    },
+    "reminder": {
+        "name": "Reminders",
+        "keywords": ["reminder", "remind", "upcoming", "don't forget"],
+        "keywords_regex": [],
+    },
+    "flight": {
+        "name": "Flight Tickets",
+        "keywords": ["flight", "boarding", "airline", "departure", "arrival"],
+        "keywords_regex": [],
+    },
+    "hotel": {
+        "name": "Hotel Reservations",
+        "keywords": ["hotel", "accommodation", "check-in", "check-out", "reservation"],
+        "keywords_regex": [],
+    },
+    "dinner": {
+        "name": "Restaurant Reservations",
+        "keywords": ["restaurant", "dinner", "lunch", "reservation", "table"],
+        "keywords_regex": [],
+    },
+}
+
+
 class ConfigManager:
     @staticmethod
     async def get_config() -> dict:
@@ -121,14 +155,14 @@ class ConfigManager:
             json_value = json.dumps(value)
             result = await session.execute(select(Config).where(Config.key == key))
             existing = result.scalar_one_or_none()
-            
+
             if existing:
                 existing.value = json_value
                 existing.updated_at = datetime.utcnow()
             else:
                 config = Config(key=key, value=json_value)
                 session.add(config)
-            
+
             await session.commit()
             logger.info(f"Config updated: {key}")
 

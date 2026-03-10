@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-from imap_tools import AND, OR, FolderInfo, MailBox, MailMessage, MailBoxUnencrypted
+from imap_tools import AND, OR, FolderInfo, MailBox, MailBoxUnencrypted
 
 from protoncalbridge.exceptions import IMAPAuthenticationError, IMAPConnectionError
 

@@ -109,8 +109,11 @@
                 <form id="filter-form">
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Folders (comma-separated)</label>
-                            <input type="text" name="folders" value="{{ config.filter.folders|default(['INBOX'])|join(',') }}">
+                            <label>Folders to Monitor</label>
+                            <div id="folder-checkboxes">
+                                <input type="text" name="folders" value="{{ config.filter.folders|default(['INBOX'])|join(',') }}" placeholder="Click 'Fetch Folders' to select">
+                            </div>
+                            <button type="button" class="btn btn-secondary" onclick="fetchFolders()" style="margin-top: 5px;">Fetch Folders</button>
                         </div>
                         <div class="form-group">
                             <label>Check Interval (minutes)</label>
@@ -456,7 +459,49 @@
                     container.innerHTML = '<p>No emails processed yet.</p>';
                     return;
                 }
-                container.innerHTML = `<table><tr><th>Subject</th><th>Sender</th><th>Status</th><th>Processed</th></tr>${emails.map(e => `<tr><td>${e.subject}</td><td>${e.sender}</td><td><span class="badge badge-${e.status}">${e.status}</span></td><td>${e.processed_at || 'N/A'}</td></tr>`).join('')}</table>`;
+                container.innerHTML = `<table><tr><th>Subject</th><th>Sender</th><th>Status</th><th>Details</th><th>Actions</th></tr>${emails.map(e => {
+                    let details = '';
+                    if (e.status === 'llm_error' && e.llm_response) {
+                        const err = e.llm_response.error || e.llm_response;
+                        details = `<span title="${err}" style="cursor:help;">${err.substring(0, 50)}${err.length > 50 ? '...' : ''}</span>`;
+                    } else if (e.event_data && e.event_data.title) {
+                        details = e.event_data.title;
+                    }
+                    const reprocessBtn = (e.status === 'llm_error' || e.status === 'caldav_error' || e.status === 'rejected' || e.status === 'pending') ? 
+                        `<button onclick="reprocessEmail(${e.id})" class="btn btn-secondary" style="padding: 4px 8px; font-size: 12px; margin-right: 5px;">Re-process</button>` : '';
+                    const deleteBtn = `<button onclick="deleteEmail(${e.id})" class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;">Delete</button>`;
+                    return `<tr><td>${e.subject}</td><td>${e.sender}</td><td><span class="badge badge-${e.status}">${e.status}</span></td><td>${details}</td><td>${reprocessBtn}${deleteBtn}</td></tr>`;
+                }).join('')}</table>`;
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function reprocessEmail(emailId) {
+            try {
+                const res = await fetch('/api/history/' + emailId + '/reprocess', {method: 'POST'});
+                const result = await res.json();
+                if (result.success) {
+                    showStatus('Re-processed! Status: ' + result.status, result.status === 'created' ? 'success' : 'error');
+                    loadHistory();
+                } else {
+                    showStatus('Error: ' + result.error, 'error');
+                }
+            } catch (e) {
+                showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteEmail(emailId) {
+            if (!confirm('Delete this email from history?')) return;
+            try {
+                const res = await fetch('/api/history/' + emailId, {method: 'DELETE'});
+                if (res.ok) {
+                    showStatus('Deleted', 'success');
+                    loadHistory();
+                } else {
+                    showStatus('Failed to delete', 'error');
+                }
             } catch (e) {
                 showStatus('Error: ' + e.message, 'error');
             }
@@ -636,15 +681,35 @@
                 });
                 const result = await res.json();
                 if (result.success) {
-                    const filterForm = document.getElementById('filter-form');
-                    const folderNames = result.folders.map(f => f.name).join(', ');
-                    filterForm.querySelector('[name="folders"]').value = folderNames;
-                    showStatus('Found ' + result.folders.length + ' folders!', 'success');
+                    const container = document.getElementById('folder-checkboxes');
+                    const currentFolders = (container.querySelector('[name="folders"]')?.value || 'INBOX').split(',').map(f => f.trim()).filter(f => f);
+                    
+                    let html = '<div style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px;">';
+                    result.folders.forEach(folder => {
+                        const checked = currentFolders.includes(folder.name) ? 'checked' : '';
+                        html += `<div class="checkbox-group" style="margin-bottom: 5px;">
+                            <input type="checkbox" class="folder-checkbox" value="${folder.name}" ${checked} onchange="updateFolderInput()">
+                            <label>${folder.name}</label>
+                        </div>`;
+                    });
+                    html += '</div>';
+                    html += '<input type="hidden" name="folders" value="' + currentFolders.join(',') + '">';
+                    container.innerHTML = html;
+                    showStatus('Found ' + result.folders.length + ' folders! Select the ones to monitor.', 'success');
                 } else {
                     showStatus('Failed to fetch folders: ' + result.error, 'error');
                 }
             } catch (e) {
                 showStatus('Error: ' + e.message, 'error');
+            }
+        }
+
+        function updateFolderInput() {
+            const checkboxes = document.querySelectorAll('.folder-checkbox:checked');
+            const values = Array.from(checkboxes).map(cb => cb.value);
+            const hiddenInput = document.querySelector('#folder-checkboxes input[name="folders"]');
+            if (hiddenInput) {
+                hiddenInput.value = values.join(',');
             }
         }
 

@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -114,6 +115,7 @@ async def get_history(session: AsyncSession = Depends(get_session)):
             "processed_at": e.processed_at.isoformat() if e.processed_at else None,
             "status": e.status,
             "event_data": e.event_data,
+            "llm_response": e.llm_response,
             "caldav_event_id": e.caldav_event_id,
         }
         for e in emails
@@ -128,6 +130,107 @@ async def delete_history(email_id: int, session: AsyncSession = Depends(get_sess
         await session.delete(email)
         await session.commit()
     return {"status": "ok"}
+
+
+@app.post("/api/history/{email_id}/reprocess")
+async def reprocess_email(email_id: int, session: AsyncSession = Depends(get_session)):
+    from protoncalbridge.caldav_client import CalDAVClient, CalDAVConfig
+    from protoncalbridge.llm_parser import LLMConfig, LLMParser
+
+    result = await session.execute(select(Email).where(Email.id == email_id))
+    email = result.scalar_one_or_none()
+    if not email:
+        return {"success": False, "error": "Email not found"}
+
+    config = await ConfigManager.get_config()
+
+    llm_config = None
+    llm_data = config.get("llm", {})
+    if llm_data.get("api_key"):
+        llm_config = LLMConfig(
+            provider=llm_data.get("provider", "openai"),
+            api_key=llm_data.get("api_key", ""),
+            model=llm_data.get("model", "gpt-4o-mini"),
+            base_url=llm_data.get("base_url"),
+            temperature=llm_data.get("temperature", 0.0),
+            max_tokens=llm_data.get("max_tokens", 1000),
+            system_prompt=llm_data.get("system_prompt", ""),
+        )
+
+    if not llm_config:
+        return {"success": False, "error": "LLM not configured"}
+
+    email.status = "pending"
+    await session.commit()
+
+    parser = LLMParser(llm_config)
+    try:
+        logger.info(f"Using LLM config - provider: {llm_config.provider}, model: {llm_config.model}")
+        event = await parser.parse_event(
+            email_subject=email.subject,
+            email_body=email.body_text or "",
+        )
+
+        def event_to_dict(e):
+            if not e:
+                return None
+            d = {}
+            for k, v in e.__dict__.items():
+                if isinstance(v, datetime):
+                    d[k] = v.isoformat()
+                else:
+                    d[k] = v
+            return d
+
+        email.event_data = event_to_dict(event)
+        email.llm_response = {"parsed": True, "event": email.event_data}
+
+        if event:
+            if not event.start_time:
+                from datetime import date
+                event.start_time = datetime.combine(date.today(), datetime.min.time())
+                event.end_time = event.start_time
+                event.all_day = True
+
+            caldav_data = config.get("caldav", {})
+            if caldav_data.get("server_url"):
+                caldav_config = CalDAVConfig(
+                    server_url=caldav_data.get("server_url", ""),
+                    username=caldav_data.get("username", ""),
+                    password=caldav_data.get("password", ""),
+                    calendar_id=caldav_data.get("calendar_id", ""),
+                    verify_ssl=caldav_data.get("verify_ssl", True),
+                )
+                client = CalDAVClient(caldav_config)
+                client.connect()
+                try:
+                    event_id = client.create_event(event)
+                    email.caldav_event_id = str(event_id) if event_id else None
+                    email.status = "created"
+                except Exception as e:
+                    email.status = "caldav_error"
+                    email.llm_response["caldav_error"] = str(e)
+                finally:
+                    client.disconnect()
+            else:
+                email.status = "parsed"
+        else:
+            email.status = "rejected"
+
+    except Exception as e:
+        email.status = "llm_error"
+        email.llm_response = {"error": str(e)}
+    finally:
+        await parser.close()
+
+    await session.commit()
+    await session.refresh(email)
+    return {
+        "success": True,
+        "status": email.status,
+        "event_data": email.event_data,
+        "llm_response": email.llm_response,
+    }
 
 
 @app.post("/api/history/clear")
@@ -241,10 +344,10 @@ async def test_imap_connection(req: TestIMAPRequest):
         )
         client = IMAPClient(imap_config)
         client.connect()
-        
+
         folders = client.get_folders()
         client.disconnect()
-        
+
         return {
             "success": True,
             "message": f"Connected successfully! Found {len(folders)} folders.",
@@ -266,10 +369,10 @@ async def get_imap_folders(req: TestIMAPRequest):
         )
         client = IMAPClient(imap_config)
         client.connect()
-        
+
         folders = client.get_folders()
         client.disconnect()
-        
+
         return {
             "success": True,
             "folders": [{"name": f.name, "flags": list(f.flags) if f.flags else []} for f in folders]
@@ -291,26 +394,26 @@ class ApplyPresetRequest(BaseModel):
 @app.post("/api/presets/apply")
 async def apply_preset(req: ApplyPresetRequest):
     from protoncalbridge.config_manager import PRESETS, ConfigManager
-    
+
     all_keywords = []
     all_keywords_regex = []
-    
+
     for preset_key in req.preset_keys:
         if preset_key in PRESETS:
             preset = PRESETS[preset_key]
             all_keywords.extend(preset.get("keywords", []))
             all_keywords_regex.extend(preset.get("keywords_regex", []))
-    
+
     all_keywords = list(set(all_keywords))
     all_keywords_regex = list(set(all_keywords_regex))
-    
+
     current_config = await ConfigManager.get_config()
     current_keywords = current_config.get("filter", {}).get("keywords", [])
     current_keywords_regex = current_config.get("filter", {}).get("keywords_regex", [])
-    
+
     combined_keywords = list(set(current_keywords + all_keywords))
     combined_keywords_regex = list(set(current_keywords_regex + all_keywords_regex))
-    
+
     return {
         "success": True,
         "keywords": combined_keywords,
@@ -332,10 +435,10 @@ async def test_llm_connection(req: TestLLMRequest):
             system_prompt="You are a test assistant. Return 'OK' if you receive this message.",
         )
         parser = LLMParser(llm_config)
-        
+
         await parser.parse_event("Test email", "This is a test message.")
         await parser.close()
-        
+
         return {
             "success": True,
             "message": "LLM connection successful!",
@@ -362,10 +465,10 @@ async def test_caldav_connection(req: TestCalDAVRequest):
         )
         client = CalDAVClient(caldav_config)
         client.connect()
-        
+
         calendars = client.get_calendars()
         client.disconnect()
-        
+
         return {
             "success": True,
             "message": f"Connected successfully! Found {len(calendars)} calendars.",

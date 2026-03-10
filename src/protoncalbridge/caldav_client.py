@@ -124,27 +124,43 @@ class CalDAVClient:
     def _create_ics(self, event: CalendarEvent, uid: str | None = None) -> str:
         uid = uid or f"protoncalbridge-{datetime.utcnow().timestamp()}"
 
-        dtstart = self._format_ics_datetime(event.start_time, event.all_day)
-        dtend = self._format_ics_datetime(event.end_time, event.all_day)
+        if event.all_day:
+            dtstart = "DTSTART;VALUE=DATE:" + event.start_time.strftime("%Y%m%d")
+            if event.end_time:
+                dtend = "DTEND;VALUE=DATE:" + event.end_time.strftime("%Y%m%d")
+            else:
+                from datetime import timedelta
+                dtend = "DTEND;VALUE=DATE:" + (event.start_time + timedelta(days=1)).strftime("%Y%m%d")
+        else:
+            if event.start_time:
+                dtstart = "DTSTART:" + event.start_time.strftime("%Y%m%dT%H%M%S") + "Z"
+            else:
+                dtstart = ""
+            if event.end_time:
+                dtend = "DTEND:" + event.end_time.strftime("%Y%m%dT%H%M%S") + "Z"
+            elif event.start_time:
+                from datetime import timedelta
+                dtend = "DTEND:" + (event.start_time + timedelta(hours=1)).strftime("%Y%m%dT%H%M%S") + "Z"
+            else:
+                dtend = ""
 
         lines = [
             "BEGIN:VCALENDAR",
             "VERSION:2.0",
             "PRODID:-//ProtonCalBridge//EN",
             "CALSCALE:GREGORIAN",
-            "METHOD:PUBLISH",
             "BEGIN:VEVENT",
-            f"UID:{uid}",
-            f"DTSTART:{dtstart}",
-            f"DTEND:{dtend}",
-            f"SUMMARY:{event.title}",
+            "UID:" + uid,
+            dtstart,
+            dtend,
+            "SUMMARY:" + self._escape_ics_text(event.title),
         ]
 
         if event.location:
-            lines.append(f"LOCATION:{event.location}")
+            lines.append("LOCATION:" + self._escape_ics_text(event.location))
 
         if event.description:
-            lines.append(f"DESCRIPTION:{event.description}")
+            lines.append("DESCRIPTION:" + self._escape_ics_text(event.description))
 
         lines.extend([
             "END:VEVENT",
@@ -153,9 +169,23 @@ class CalDAVClient:
 
         return "\r\n".join(lines)
 
-    def _format_ics_datetime(self, dt: datetime | None, all_day: bool) -> str:
+    def _escape_ics_text(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.replace("\\", "\\\\")
+        text = text.replace(",", "\\,")
+        text = text.replace(";", "\\;")
+        text = text.replace("\n", "\\n")
+        text = text.replace("\r", "")
+        return text
+
+    def _format_ics_datetime(self, dt: datetime | None, all_day: bool, offset_hours: int = 0, offset_days: int = 0) -> str:
         if not dt:
             return ""
+        if offset_hours:
+            dt = dt.replace(hour=dt.hour + offset_hours)
+        if offset_days:
+            dt = dt.replace(day=dt.day + offset_days)
         if all_day:
             return dt.strftime("%Y%m%d")
         return dt.strftime("%Y%m%dT%H%M%SZ")

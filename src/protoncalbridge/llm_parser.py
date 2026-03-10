@@ -25,9 +25,33 @@ class LLMConfig:
 
 
 DEFAULT_SYSTEM_PROMPT = """You are an email calendar event parser. Extract calendar events from emails.
-Return a JSON object with: title, start_time, end_time, location, description, all_day (boolean).
-If no valid event found, return {"error": "no_event"}.
-Times must be in ISO 8601 format."""
+
+Return valid iCalendar (ICS) format with:
+- If time is specified: use DTSTART/DTEND with time (e.g., DTSTART:20240315T140000Z)
+- If NO time specified: use all-day event with DATE format (e.g., DTSTART;VALUE=DATE:20240315)
+- Include SUMMARY, LOCATION if available
+- If no valid event found, return {"error": "no_event"}
+
+Example with time:
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART:20240315T140000Z
+DTEND:20240315T150000Z
+SUMMARY:Team Meeting
+LOCATION:Conference Room A
+END:VEVENT
+END:VCALENDAR
+
+Example without time (all-day):
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART;VALUE=DATE:20240315
+DTEND;VALUE=DATE:20240316
+SUMMARY:Conference
+END:VEVENT
+END:VCALENDAR"""
 
 
 @dataclass
@@ -150,6 +174,7 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
 
     async def _parse_openai_compatible(self, user_prompt: str) -> CalendarEvent:
         base_url = self.config.base_url or "http://localhost:8000"
+        base_url = base_url.rstrip("/")
         client = await self._get_client()
         response = await client.post(
             f"{base_url}/v1/chat/completions",
@@ -170,28 +195,121 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
         response.raise_for_status()
         data = response.json()
         content = data["choices"][0]["message"]["content"]
+        if not content:
+            raise LLMParseError("LLM returned empty response")
         return self._parse_response(content)
 
     def _parse_response(self, content: str) -> CalendarEvent:
         content = content.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
+        logger.info(f"LLM raw response: {content[:500]}")
+
+        if content.startswith("```"):
+            lines = content.split("\n")
+            if len(lines) > 1:
+                content = "\n".join(lines[1:])
+            if content.endswith("```"):
+                content = content[:-3]
         content = content.strip()
 
-        data = json.loads(content)
+        if content.startswith("BEGIN:VCALENDAR"):
+            logger.info("Detected ICS format response")
+            return self._parse_ics_response(content)
+
+        if content.startswith("BEGIN:VCALENDAR"):
+            logger.info("Detected ICS format response")
+            return self._parse_ics_response(content)
+
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            import re
+            match = re.search(r'\{[^{}]*\}', content)
+            if match:
+                try:
+                    data = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    pass
+            else:
+                raise LLMParseError(f"Invalid response from LLM: {content[:200]}")
+
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                raise LLMParseError(f"Invalid response from LLM: {content[:200]}")
 
         if "error" in data:
             raise LLMParseError(f"LLM returned no event: {data['error']}")
 
+        start_time = self._parse_datetime(data.get("start_time"))
+        end_time = self._parse_datetime(data.get("end_time"))
+        all_day = data.get("all_day", False)
+
+        if not start_time and all_day:
+            from datetime import date
+            start_time = datetime.combine(date.today(), datetime.min.time())
+            if end_time:
+                end_time = datetime.combine(date.today(), datetime.min.time())
+
         return CalendarEvent(
             title=data.get("title", "Untitled Event"),
-            start_time=self._parse_datetime(data.get("start_time")),
-            end_time=self._parse_datetime(data.get("end_time")),
+            start_time=start_time,
+            end_time=end_time,
             location=data.get("location"),
             description=data.get("description"),
-            all_day=data.get("all_day", False),
+            all_day=all_day,
+        )
+
+    def _parse_ics_response(self, content: str) -> CalendarEvent:
+        import re
+        title = "Untitled Event"
+        location = None
+        description = None
+        start_time = None
+        end_time = None
+        all_day = False
+
+        match = re.search(r'SUMMARY:(.+?)(?:\r?\n|$)', content)
+        if match:
+            title = match.group(1).strip()
+
+        match = re.search(r'LOCATION:(.+?)(?:\r?\n|$)', content)
+        if match:
+            location = match.group(1).strip()
+
+        match = re.search(r'DESCRIPTION:(.+?)(?:\r?\n|$)', content)
+        if match:
+            description = match.group(1).strip()
+
+        match = re.search(r'DTSTART(;VALUE=DATE)?:(\d{8}(?:T\d{6}Z)?)', content)
+        if match:
+            is_date = match.group(1) is not None
+            value = match.group(2)
+            if is_date:
+                all_day = True
+                start_time = datetime.strptime(value, "%Y%m%d")
+            else:
+                start_time = datetime.strptime(value.replace("Z", ""), "%Y%m%dT%H%M%S")
+
+        match = re.search(r'DTEND(;VALUE=DATE)?:(\d{8}(?:T\d{6}Z)?)', content)
+        if match:
+            is_date = match.group(1) is not None
+            value = match.group(2)
+            if is_date:
+                end_time = datetime.strptime(value, "%Y%m%d")
+            else:
+                end_time = datetime.strptime(value.replace("Z", ""), "%Y%m%dT%H%M%S")
+
+        if not start_time:
+            raise LLMParseError("No DTSTART found in ICS response")
+
+        return CalendarEvent(
+            title=title,
+            start_time=start_time,
+            end_time=end_time,
+            location=location,
+            description=description,
+            all_day=all_day,
         )
 
     def _parse_datetime(self, value: str | None) -> datetime | None:
