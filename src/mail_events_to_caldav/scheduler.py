@@ -175,8 +175,9 @@ class Poller:
                 att_text = ""
                 if email.attachment_texts:
                     att_text = f", {len(email.attachment_texts)} attachments ({sum(len(t) for t in email.attachment_texts)} chars)"
+                subject = (email.subject or "")[:40]
                 logger.info(
-                    f"  Email: {email.subject[:40]}... (has_attachments={email.has_attachments}{att_text})"
+                    f"  Email: {subject}... (has_attachments={email.has_attachments}{att_text})"
                 )
                 await self._process_email(email, email_filter)
         finally:
@@ -191,7 +192,8 @@ class Poller:
         self, email: EmailMessage, email_filter: EmailFilter
     ) -> None:
         if not email_filter.should_process(email):
-            logger.info(f"Email filtered out by filter: {email.subject[:40]}")
+            subject = (email.subject or "")[:40]
+            logger.info(f"Email filtered out by filter: {subject}")
             return
 
         async with async_session() as session:
@@ -202,13 +204,15 @@ class Poller:
                 "rejected",
                 "pending",
             ):
+                subject = (email.subject or "")[:40]
                 logger.info(
-                    f"Email already processed successfully, skipping: {email.subject[:40]}"
+                    f"Email already processed successfully, skipping: {subject}"
                 )
                 return
 
             await self._save_email(session, email)
-            logger.info(f"Processing email: {email.subject[:40]}...")
+            subject = (email.subject or "")[:40]
+            logger.info(f"Processing email: {subject}...")
 
             if self.llm_config:
                 await self._process_with_llm(session, email)
@@ -232,8 +236,9 @@ class Poller:
             logger.info(f"Email body text length: {len(email.body_text or '')} chars")
 
             combined_body = (email.body_text or "") + attachment_text
+            subject = (email.subject or "")[:50]
             logger.info(
-                f"Sending to LLM - subject: {email.subject[:50]}..., body length: {len(combined_body)}"
+                f"Sending to LLM - subject: {subject}..., body length: {len(combined_body)}"
             )
             if "Ticket" in email.subject:
                 logger.info(f"FULL BODY for Ticket: {combined_body[:1000]}...")

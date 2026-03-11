@@ -54,27 +54,34 @@ class EmailFilter:
 
     def should_process(self, email: EmailMessage) -> bool:
         if not self._check_folders(email):
-            logger.warning(f"FILTERED folders: {email.subject[:40]}")
+            subject = (email.subject or "")[:40]
+            logger.warning(f"FILTERED folders: {subject}")
             return False
         if not self._check_keywords(email):
             return False
         if not self._check_keywords_regex(email):
-            logger.warning(f"FILTERED keywords_regex: {email.subject[:40]}")
+            subject = (email.subject or "")[:40]
+            logger.warning(f"FILTERED keywords_regex: {subject}")
             return False
         if not self._check_senders(email):
-            logger.warning(f"FILTERED senders: {email.subject[:40]}")
+            subject = (email.subject or "")[:40]
+            logger.warning(f"FILTERED senders: {subject}")
             return False
         if not self._check_senders_regex(email):
-            logger.warning(f"FILTERED senders_regex: {email.subject[:40]}")
+            subject = (email.subject or "")[:40]
+            logger.warning(f"FILTERED senders_regex: {subject}")
             return False
         if not self._check_recipients(email):
-            logger.warning(f"FILTERED recipients: {email.subject[:40]}")
+            subject = (email.subject or "")[:40]
+            logger.warning(f"FILTERED recipients: {subject}")
             return False
         if not self._check_recipients_regex(email):
-            logger.warning(f"FILTERED recipients_regex: {email.subject[:40]}")
+            subject = (email.subject or "")[:40]
+            logger.warning(f"FILTERED recipients_regex: {subject}")
             return False
         if not self._check_attachments(email):
-            logger.warning(f"FILTERED attachments: {email.subject[:40]}")
+            subject = (email.subject or "")[:40]
+            logger.warning(f"FILTERED attachments: {subject}")
             return False
         return True
 
@@ -99,8 +106,10 @@ class EmailFilter:
             if in_subject or in_body:
                 return True
 
+        subject = (email.subject or "")[:40]
+        body = (email.body_text or "")[:30]
         logger.warning(
-            f"KEYWORDS FILTER: '{email.subject[:40]}' - subject='{subject_lower[:30]}', body='{body_lower[:30]}', keywords={self.config.keywords}"
+            f"KEYWORDS FILTER: '{subject}' - subject='{body}', keywords={self.config.keywords}"
         )
         return False
 
