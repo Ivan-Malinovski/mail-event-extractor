@@ -47,7 +47,7 @@ pytest --cov=src --cov-report=html
 docker build -t mail_events_to_caldav .
 
 # Run container
-docker run -d -p 8080:8080 --env-file .env mail_events_to_caldav
+docker run -d -p 8888:8080 --env-file .env mail_events_to_caldav
 
 # Docker Compose
 docker-compose up -d
@@ -135,14 +135,8 @@ def parse_event(email: EmailMessage) -> CalendarEvent | None:
 ```
 ┌─────────────┐     ┌──────────┐     ┌──────┐     ┌────────┐
 │   IMAP      │────▶│  Filter  │────▶│ LLM  │────▶│ CalDAV │
-│  (Proton)   │     │  Emails  │     │ Parse│     │ Server │
+│  (any)      │     │  Emails  │     │ Parse│     │ Server │
 └─────────────┘     └──────────┘     └──────┘     └────────┘
-                           │                           │
-                           ▼                           ▼
-                    ┌──────────────┐          ┌──────────────┐
-                    │   History    │          │   Calendar   │
-                    │   (SQLite)   │          │   Events     │
-                    └──────────────┘          └──────────────┘
 ```
 
 ### Data Flow
@@ -210,7 +204,7 @@ Times must be in ISO 8601 format.
 
 ### 7. Web UI Settings
 - **Host**: Listen address (default: `0.0.0.0`)
-- **Port**: Listen port (default: `8080`)
+- **Port**: Listen port (default: `8888`)
 - **Authentication**: Enable password protection (default: False)
 - **Password**: Web UI password (if enabled)
 
@@ -238,6 +232,7 @@ Times must be in ISO 8601 format.
 | PUT | `/api/config` | Update configuration |
 | GET | `/api/emails/preview` | Preview which emails match filters |
 | POST | `/api/emails/test-parse` | Test LLM parsing on specific email |
+| POST | `/api/emails/process-now` | Trigger immediate processing |
 | GET | `/api/history` | List processed emails |
 | DELETE | `/api/history/{id}` | Remove from history |
 | POST | `/api/calendars` | Fetch available calendars |
