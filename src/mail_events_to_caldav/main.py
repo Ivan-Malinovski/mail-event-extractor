@@ -27,6 +27,7 @@ from mail_events_to_caldav.config_service import (
 from mail_events_to_caldav.database import Email, async_session, init_db
 from mail_events_to_caldav.filter import EmailFilter
 from mail_events_to_caldav.imap_client import IMAPClient, IMAPConfig
+from mail_events_to_caldav.imap_client import IMAPConnectionError
 from mail_events_to_caldav.llm_parser import (
     CalendarEvent,
     LLMConfig,
@@ -305,8 +306,16 @@ async def preview_emails():
             }
             for e in filtered_emails
         ]
+    except IMAPConnectionError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e).encode("utf-8", errors="replace").decode("utf-8"),
+        )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=400,
+            detail=str(e).encode("utf-8", errors="replace").decode("utf-8"),
+        )
 
 
 @app.post("/api/emails/process-now")

@@ -95,7 +95,22 @@ class IMAPClient:
             self._mailbox.folder.set(folder)
             messages: list[EmailMessage] = []
 
-            for msg in self._mailbox.fetch(criteria, limit=limit, reverse=True):
+            try:
+                msg_list = list(
+                    self._mailbox.fetch(criteria, limit=limit, reverse=True)
+                )
+            except Exception as fetch_err:
+                err_msg = (
+                    str(fetch_err)
+                    .encode("utf-8", errors="replace")
+                    .decode("utf-8", errors="replace")
+                )
+                logger.error(f"IMAP fetch error: {err_msg}")
+                raise IMAPConnectionError(
+                    f"Failed to fetch emails: {err_msg}"
+                ) from fetch_err
+
+            for msg in msg_list:
                 try:
                     email_msg = self._parse_message(msg, folder, include_attachments)
                     messages.append(email_msg)
@@ -106,9 +121,16 @@ class IMAPClient:
             logger.info(f"Fetched {len(messages)} emails from {folder}")
             return messages
 
+        except IMAPConnectionError:
+            raise
         except Exception as e:
-            logger.error(f"Failed to fetch emails: {e}")
-            raise IMAPConnectionError(f"Failed to fetch emails: {e}") from e
+            err_msg = (
+                str(e)
+                .encode("utf-8", errors="replace")
+                .decode("utf-8", errors="replace")
+            )
+            logger.error(f"Failed to fetch emails: {err_msg}")
+            raise IMAPConnectionError(f"Failed to fetch emails: {err_msg}") from e
 
     def _build_criteria(
         self,
