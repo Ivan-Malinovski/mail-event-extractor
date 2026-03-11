@@ -15,15 +15,13 @@ RUN pip install poetry && \
 COPY src/ ./src/
 COPY templates/ ./templates/
 
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /data && \
-    chown -R appuser:appuser /app
+ENV PYTHONPATH=/app/src:$PYTHONPATH
 
-USER appuser
+RUN mkdir -p /app/data /data
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-CMD ["python", "-m", "protoncalbridge.main"]
+CMD ["python", "-m", "mail_events_to_caldav.main"]

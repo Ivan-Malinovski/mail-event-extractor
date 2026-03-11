@@ -4,7 +4,11 @@ from datetime import datetime
 
 import pytest
 
-from protoncalbridge.caldav_client import CalDAVClient, CalDAVConfig, CalendarEvent
+from mail_events_to_caldav.caldav_client import (
+    CalDAVClient,
+    CalDAVConfig,
+    CalendarEvent,
+)
 
 
 @pytest.fixture

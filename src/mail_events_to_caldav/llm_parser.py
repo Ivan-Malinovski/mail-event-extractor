@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 import httpx
 
-from protoncalbridge.exceptions import LLMError, LLMParseError
+from mail_events_to_caldav.exceptions import LLMError, LLMParseError
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class LLMConfig:
     tz: str = DEFAULT_TIMEZONE
 
 
-DEFAULT_SYSTEM_PROMPT = """You are an email calendar event parser. Extract calendar events from emails. Feel free to rephrase titles for brevity, and add a fitting emoji in front of the title. If there are more events, output each as separate JSON objects.If you consider it a task, put task as true.
+DEFAULT_SYSTEM_PROMPT = """You are an email calendar event parser. Extract calendar events from emails. Feel free to rephrase titles for brevity, and add a fitting emoji in front of the title. If description is relevant, ensure it's easily human readable. If there are more events, output each as separate JSON objects. If you consider it a task, put task as true.
 Return a JSON object with: title, start_time, end_time, location, description, all_day (boolean), task (boolean).
 If no valid event found, return {"error": "no_event"}.
 Times must be in ISO 8601 format."""
@@ -62,7 +62,9 @@ class LLMParser:
             await self._client.aclose()
             self._client = None
 
-    async def parse_event(self, email_subject: str, email_body: str) -> list[CalendarEvent]:
+    async def parse_event(
+        self, email_subject: str, email_body: str
+    ) -> list[CalendarEvent]:
         user_prompt = f"""Extract calendar event from this email:
 
 Subject: {email_subject}
@@ -72,18 +74,34 @@ Body:
 
 Return JSON with: title, start_time, end_time, location, description, all_day (boolean), task (boolean). If multiple events, return an array of JSON objects."""
 
+        logger.info(
+            f"LLM prompt length: {len(user_prompt)} chars (subject: {email_subject[:40]}...)"
+        )
+        if "[PDF:" in email_body:
+            logger.info(
+                f"PDF content included in prompt: {email_body.count('[PDF:')} PDFs"
+            )
+        logger.debug(f"LLM prompt: {user_prompt[:500]}...")
+
         for attempt in range(3):
             try:
                 if self.config.provider == "openai":
-                    return await self._parse_openai(user_prompt)
+                    events = await self._parse_openai(user_prompt)
                 elif self.config.provider == "anthropic":
-                    return await self._parse_anthropic(user_prompt)
+                    events = await self._parse_anthropic(user_prompt)
                 elif self.config.provider == "ollama":
-                    return await self._parse_ollama(user_prompt)
+                    events = await self._parse_ollama(user_prompt)
                 elif self.config.provider == "openai-compatible":
-                    return await self._parse_openai_compatible(user_prompt)
+                    events = await self._parse_openai_compatible(user_prompt)
                 else:
                     raise LLMError(f"Unknown provider: {self.config.provider}")
+
+                logger.info(f"LLM returned {len(events)} events")
+                for i, e in enumerate(events):
+                    logger.info(
+                        f"  Event {i + 1}: {e.title} at {e.start_time}, task={e.task}"
+                    )
+                return events
             except (LLMError, httpx.HTTPStatusError) as e:
                 if attempt < 2:
                     delay = 1.0 * (2**attempt)
@@ -200,20 +218,23 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
 
         if content.startswith("BEGIN:VCALENDAR"):
             logger.info("Detected ICS format response")
-            event = self._parse_ics_response(content)
-            return [event]
+            return self._parse_ics_response(content)
 
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
             import re
-            match = re.search(r'\[[\s\S]*\]|\{[\s\S]*\}', content)
+
+            match = re.search(r"\[[\s\S]*\]|\{[\s\S]*\}", content)
             if match:
                 try:
                     data = json.loads(match.group(0))
                 except json.JSONDecodeError:
-                    raise LLMParseError(f"Invalid response from LLM: {content[:200]}")
+                    data = self._extract_json_objects(content)
             else:
+                data = self._extract_json_objects(content)
+
+            if data is None:
                 raise LLMParseError(f"Invalid response from LLM: {content[:200]}")
 
         if isinstance(data, str):
@@ -248,27 +269,31 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
 
             if not start_time and all_day:
                 from datetime import date
+
                 start_time = datetime.combine(date.today(), datetime.min.time())
                 if end_time:
                     end_time = datetime.combine(date.today(), datetime.min.time())
 
-            events.append(CalendarEvent(
-                title=item.get("title", "Untitled Event"),
-                start_time=start_time,
-                end_time=end_time,
-                location=item.get("location"),
-                description=item.get("description"),
-                all_day=all_day,
-                task=task,
-            ))
+            events.append(
+                CalendarEvent(
+                    title=item.get("title", "Untitled Event"),
+                    start_time=start_time,
+                    end_time=end_time,
+                    location=item.get("location"),
+                    description=item.get("description"),
+                    all_day=all_day,
+                    task=task,
+                )
+            )
 
         if not events:
             raise LLMParseError("No valid events found in LLM response")
 
         return events
 
-    def _parse_ics_response(self, content: str) -> CalendarEvent:
+    def _parse_ics_response(self, content: str) -> list[CalendarEvent]:
         import re
+
         title = "Untitled Event"
         location = None
         description = None
@@ -276,19 +301,19 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
         end_time = None
         all_day = False
 
-        match = re.search(r'SUMMARY:(.+?)(?:\r?\n|$)', content)
+        match = re.search(r"SUMMARY:(.+?)(?:\r?\n|$)", content)
         if match:
             title = match.group(1).strip()
 
-        match = re.search(r'LOCATION:(.+?)(?:\r?\n|$)', content)
+        match = re.search(r"LOCATION:(.+?)(?:\r?\n|$)", content)
         if match:
             location = match.group(1).strip()
 
-        match = re.search(r'DESCRIPTION:(.+?)(?:\r?\n|$)', content)
+        match = re.search(r"DESCRIPTION:(.+?)(?:\r?\n|$)", content)
         if match:
             description = match.group(1).strip()
 
-        match = re.search(r'DTSTART(;VALUE=DATE)?:(\d{8}(?:T\d{6}Z)?)', content)
+        match = re.search(r"DTSTART(;VALUE=DATE)?:(\d{8}(?:T\d{6}Z)?)", content)
         if match:
             is_date = match.group(1) is not None
             value = match.group(2)
@@ -298,7 +323,7 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
             else:
                 start_time = datetime.strptime(value.replace("Z", ""), "%Y%m%dT%H%M%S")
 
-        match = re.search(r'DTEND(;VALUE=DATE)?:(\d{8}(?:T\d{6}Z)?)', content)
+        match = re.search(r"DTEND(;VALUE=DATE)?:(\d{8}(?:T\d{6}Z)?)", content)
         if match:
             is_date = match.group(1) is not None
             value = match.group(2)
@@ -321,11 +346,14 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
             )
         ]
 
-    def _parse_datetime(self, value: str | None, tz: str = DEFAULT_TIMEZONE) -> datetime | None:
+    def _parse_datetime(
+        self, value: str | None, tz: str = DEFAULT_TIMEZONE
+    ) -> datetime | None:
         if not value:
             return None
         try:
             from zoneinfo import ZoneInfo
+
             dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
             if dt.tzinfo is None:
                 local_tz = ZoneInfo(tz)
@@ -333,6 +361,31 @@ Return JSON with: title, start_time, end_time, location, description, all_day (b
             return dt.astimezone(UTC)
         except ValueError:
             return None
+
+    def _extract_json_objects(self, content: str):
+        import re
+
+        try:
+            json_matches = re.findall(r"\{[^{}]*\}", content)
+            for match in json_matches:
+                try:
+                    obj = json.loads(match)
+                    if "title" in obj and "start_time" in obj:
+                        return obj
+                except json.JSONDecodeError:
+                    continue
+
+            list_match = re.search(r"\[[\s\S]*\]", content)
+            if list_match:
+                try:
+                    arr = json.loads(list_match.group(0))
+                    if isinstance(arr, list) and len(arr) > 0:
+                        return arr
+                except json.JSONDecodeError:
+                    pass
+        except Exception:
+            pass
+        return None
 
 
 def event_to_dict(event: CalendarEvent | None) -> dict[str, Any] | None:

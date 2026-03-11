@@ -8,8 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PCB_",
-        env_file=".env",
-        env_file_encoding="utf-8",
         extra="ignore",
     )
 
@@ -20,7 +18,7 @@ class Settings(BaseSettings):
     web_password: str = ""
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///data/protoncalbridge.db"
+    database_url: str = "sqlite+aiosqlite:///:memory:"
 
     # Logging
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

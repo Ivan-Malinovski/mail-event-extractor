@@ -28,6 +28,7 @@ class EmailMessage:
     message_id: str
     subject: str
     sender: str
+    folder: str | None = None
     recipient: str | None = None
     date: datetime | None = None
     body_text: str | None = None
@@ -95,7 +96,7 @@ class IMAPClient:
             messages: list[EmailMessage] = []
 
             for msg in self._mailbox.fetch(criteria, limit=limit, reverse=True):
-                email_msg = self._parse_message(msg, include_attachments)
+                email_msg = self._parse_message(msg, folder, include_attachments)
                 messages.append(email_msg)
 
             logger.info(f"Fetched {len(messages)} emails from {folder}")
@@ -135,7 +136,9 @@ class IMAPClient:
 
         return AND(*conditions)
 
-    def _parse_message(self, msg, include_attachments: bool) -> EmailMessage:
+    def _parse_message(
+        self, msg, folder: str, include_attachments: bool
+    ) -> EmailMessage:
         has_attachments = len(msg.attachments) > 0 if include_attachments else False
         attachment_texts = None
 
@@ -146,6 +149,7 @@ class IMAPClient:
             message_id=msg.uid or "",
             subject=msg.subject or "",
             sender=str(msg.from_) or "",
+            folder=folder,
             recipient=str(msg.to[0]) if msg.to else None,
             date=msg.date,
             body_text=self._get_text_body(msg),

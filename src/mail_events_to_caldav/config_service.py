@@ -3,11 +3,11 @@
 from datetime import datetime
 from typing import Any
 
-from protoncalbridge.caldav_client import CalDAVConfig
-from protoncalbridge.filter import FilterConfig
-from protoncalbridge.imap_client import IMAPConfig
-from protoncalbridge.llm_parser import CalendarEvent, LLMConfig, event_to_dict
-from protoncalbridge.scheduler import ProcessingConfig, SchedulerConfig
+from mail_events_to_caldav.caldav_client import CalDAVConfig
+from mail_events_to_caldav.filter import FilterConfig
+from mail_events_to_caldav.imap_client import IMAPConfig
+from mail_events_to_caldav.llm_parser import CalendarEvent, LLMConfig
+from mail_events_to_caldav.scheduler import ProcessingConfig, SchedulerConfig
 
 
 def build_imap_config(config: dict[str, Any]) -> IMAPConfig:

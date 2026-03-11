@@ -1,7 +1,6 @@
 """Tests for config service."""
 
-import pytest
-from protoncalbridge.config_service import (
+from mail_events_to_caldav.config_service import (
     build_caldav_config,
     build_filter_config,
     build_imap_config,
@@ -9,9 +8,8 @@ from protoncalbridge.config_service import (
     build_processing_config,
     build_scheduler_config,
     ensure_event_times,
-    event_to_dict,
 )
-from protoncalbridge.llm_parser import CalendarEvent
+from mail_events_to_caldav.llm_parser import CalendarEvent, event_to_dict
 
 
 class TestConfigService:
@@ -174,6 +172,7 @@ class TestEventHelpers:
 
     def test_ensure_event_times_with_times(self):
         from datetime import datetime
+
         event = CalendarEvent(
             title="Meeting",
             start_time=datetime(2026, 3, 15, 10, 0),

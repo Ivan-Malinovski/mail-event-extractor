@@ -4,7 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from protoncalbridge.imap_client import EmailMessage
+from mail_events_to_caldav.imap_client import EmailMessage
 
 logger = logging.getLogger(__name__)
 
@@ -46,45 +46,62 @@ class EmailFilter:
 
         for pattern in self.config.recipients_regex:
             try:
-                self._compiled_recipients_regex.append(re.compile(pattern, re.IGNORECASE))
+                self._compiled_recipients_regex.append(
+                    re.compile(pattern, re.IGNORECASE)
+                )
             except re.error as e:
                 logger.warning(f"Invalid regex pattern '{pattern}': {e}")
 
     def should_process(self, email: EmailMessage) -> bool:
         if not self._check_folders(email):
+            logger.warning(f"FILTERED folders: {email.subject[:40]}")
             return False
         if not self._check_keywords(email):
             return False
         if not self._check_keywords_regex(email):
+            logger.warning(f"FILTERED keywords_regex: {email.subject[:40]}")
             return False
         if not self._check_senders(email):
+            logger.warning(f"FILTERED senders: {email.subject[:40]}")
             return False
         if not self._check_senders_regex(email):
+            logger.warning(f"FILTERED senders_regex: {email.subject[:40]}")
             return False
         if not self._check_recipients(email):
+            logger.warning(f"FILTERED recipients: {email.subject[:40]}")
             return False
         if not self._check_recipients_regex(email):
+            logger.warning(f"FILTERED recipients_regex: {email.subject[:40]}")
             return False
         if not self._check_attachments(email):
+            logger.warning(f"FILTERED attachments: {email.subject[:40]}")
             return False
         return True
 
     def _check_folders(self, email: EmailMessage) -> bool:
         if not self.config.folders:
             return True
-        return True
+        if not email.folder:
+            return True
+        return email.folder in self.config.folders
 
     def _check_keywords(self, email: EmailMessage) -> bool:
         if not self.config.keywords:
             return True
 
-        subject_lower = email.subject.lower()
+        subject_lower = (email.subject or "").lower()
         body_lower = (email.body_text or "").lower()
 
         for keyword in self.config.keywords:
-            if keyword.lower() in subject_lower or keyword.lower() in body_lower:
+            kw = keyword.lower()
+            in_subject = kw in subject_lower
+            in_body = kw in body_lower
+            if in_subject or in_body:
                 return True
 
+        logger.warning(
+            f"KEYWORDS FILTER: '{email.subject[:40]}' - subject='{subject_lower[:30]}', body='{body_lower[:30]}', keywords={self.config.keywords}"
+        )
         return False
 
     def _check_keywords_regex(self, email: EmailMessage) -> bool:
@@ -153,7 +170,7 @@ class EmailFilter:
     def _check_attachments(self, email: EmailMessage) -> bool:
         if not self.config.include_attachments:
             return True
-        return email.has_attachments
+        return email.has_attachments is True
 
 
 def extract_email_address(email_str: str) -> str | None:

@@ -2,15 +2,19 @@
 
 from datetime import datetime
 
-from protoncalbridge.filter import EmailFilter, FilterConfig
-from protoncalbridge.imap_client import EmailMessage
+from mail_events_to_caldav.filter import EmailFilter, FilterConfig
+from mail_events_to_caldav.imap_client import EmailMessage
 
 
 class TestEmailFilter:
-    def test_should_process_with_matching_keyword_in_subject(self, email_filter, sample_email):
+    def test_should_process_with_matching_keyword_in_subject(
+        self, email_filter, sample_email
+    ):
         assert email_filter.should_process(sample_email) is True
 
-    def test_should_process_without_matching_keyword(self, email_filter, sample_email_no_match):
+    def test_should_process_without_matching_keyword(
+        self, email_filter, sample_email_no_match
+    ):
         assert email_filter.should_process(sample_email_no_match) is False
 
     def test_should_process_with_no_keywords(self):

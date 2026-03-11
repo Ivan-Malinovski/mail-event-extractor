@@ -5,11 +5,6 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -39,6 +34,11 @@ from mail_events_to_caldav.llm_parser import (
     events_to_dict_list,
 )
 from mail_events_to_caldav.scheduler import Poller
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 logging.getLogger().setLevel(getattr(logging, settings.log_level))
 logger = logging.getLogger(__name__)

@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
-from protoncalbridge.database import Config, async_session
+from mail_events_to_caldav.database import Config, async_session
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ DEFAULT_CONFIG = {
         "base_url": None,
         "temperature": 0.0,
         "max_tokens": 1000,
-        "system_prompt": "You are an email calendar event parser. Extract calendar events from emails.\nReturn a JSON object with: title, start_time, end_time, location, description, all_day (boolean).\nIf no valid event found, return {\"error\": \"no_event\"}.\nTimes must be in ISO 8601 format.",
+        "system_prompt": 'You are an email calendar event parser. Extract calendar events from emails. Feel free to rephrase titles for brevity, and add a fitting emoji in front of the title. If description is relevant, ensure it\'s easily human readable. If there are more events, output each as separate JSON objects. If you consider it a task, put task as true.\nReturn a JSON object with: title, start_time, end_time, location, description, all_day (boolean), task (boolean).\nIf no valid event found, return {"error": "no_event"}.\nTimes must be in ISO 8601 format.',
     },
     "caldav": {
         "server_url": "",
@@ -76,7 +76,15 @@ DEFAULT_CONFIG = {
 PRESETS: dict = {
     "meeting": {
         "name": "Meeting Invites",
-        "keywords": ["meeting", "invite", "invitation", "zoom", "teams", "google meet", "call"],
+        "keywords": [
+            "meeting",
+            "invite",
+            "invitation",
+            "zoom",
+            "teams",
+            "google meet",
+            "call",
+        ],
         "keywords_regex": [],
     },
     "event": {
@@ -151,6 +159,7 @@ class ConfigManager:
     @staticmethod
     async def set_config(key: str, value: Any) -> None:
         from datetime import datetime
+
         async with async_session() as session:
             json_value = json.dumps(value)
             result = await session.execute(select(Config).where(Config.key == key))

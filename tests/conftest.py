@@ -1,11 +1,11 @@
-"""Test fixtures for ProtonCalBridge tests."""
+"""Test fixtures for mail-events-to-caldav tests."""
 
 from datetime import datetime
 
 import pytest
 
-from protoncalbridge.filter import EmailFilter, FilterConfig
-from protoncalbridge.imap_client import EmailMessage
+from mail_events_to_caldav.filter import EmailFilter, FilterConfig
+from mail_events_to_caldav.imap_client import EmailMessage
 
 
 @pytest.fixture

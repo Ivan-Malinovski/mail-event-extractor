@@ -1,13 +1,10 @@
 """Tests for IMAP client HTML text extraction."""
 
-import pytest
-from unittest.mock import MagicMock, patch
-
 
 class TestIMAPTextExtraction:
     def test_strip_html_basic(self):
-        from protoncalbridge.imap_client import IMAPClient
-        
+        from mail_events_to_caldav.imap_client import IMAPClient
+
         client = IMAPClient.__new__(IMAPClient)
         html = "<p>Hello <b>World</b></p>"
         result = client._strip_html(html)
@@ -16,8 +13,8 @@ class TestIMAPTextExtraction:
         assert "<" not in result
 
     def test_strip_html_with_scripts(self):
-        from protoncalbridge.imap_client import IMAPClient
-        
+        from mail_events_to_caldav.imap_client import IMAPClient
+
         client = IMAPClient.__new__(IMAPClient)
         html = "<script>alert('xss')</script><p>Content</p>"
         result = client._strip_html(html)
@@ -25,8 +22,8 @@ class TestIMAPTextExtraction:
         assert "Content" in result
 
     def test_strip_html_with_styles(self):
-        from protoncalbridge.imap_client import IMAPClient
-        
+        from mail_events_to_caldav.imap_client import IMAPClient
+
         client = IMAPClient.__new__(IMAPClient)
         html = "<style>.foo { color: red; }</style><p>Text</p>"
         result = client._strip_html(html)
@@ -35,8 +32,8 @@ class TestIMAPTextExtraction:
         assert "Text" in result
 
     def test_strip_html_with_entities(self):
-        from protoncalbridge.imap_client import IMAPClient
-        
+        from mail_events_to_caldav.imap_client import IMAPClient
+
         client = IMAPClient.__new__(IMAPClient)
         html = "<p>&nbsp;&copy;2026</p>"
         result = client._strip_html(html)
