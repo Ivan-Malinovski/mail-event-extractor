@@ -1,12 +1,17 @@
-version: "3.8"
-
 services:
-  protoncalbridge:
+  mail_events_to_caldav:
     build: .
-    container_name: protoncalbridge
-    network_mode: host
+    container_name: mail_events_to_caldav
+    ports:
+      - "8888:8080"
+    environment:
+      - PCB_DATABASE_URL=sqlite+aiosqlite:////data//mail_events_to_caldav.db
     volumes:
       - ./data:/data
-    env_file:
-      - .env
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

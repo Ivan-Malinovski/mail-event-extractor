@@ -2,7 +2,7 @@
 PROTONCALBRIDGE - CODE REVIEW FINDINGS
 ================================================================================
 
-This document outlines issues found during code review of the ProtonCalBridge
+This document outlines issues found during code review of the mail_events_to_caldav
 project. Issues are categorized by severity and impact.
 
 ================================================================================
@@ -11,7 +11,7 @@ SECTION 1: BUGS
 
 1.1 CRITICAL: _check_folders Does Nothing
 ------------------------------------------
-Location: src/protoncalbridge/filter.py (lines 72-75)
+Location: src/mail_events_to_caldav/filter.py (lines 72-75)
 
     def _check_folders(self, email: EmailMessage) -> bool:
         if not self.config.folders:
@@ -29,7 +29,7 @@ IMAP folder filtering happens at fetch time, not per-email.
 
 1.2 HIGH: New Connection Per Email (Performance)
 ------------------------------------------------
-Location: src/protoncalbridge/scheduler.py (lines 95-114, 137-155, 162-174)
+Location: src/mail_events_to_caldav/scheduler.py (lines 95-114, 137-155, 162-174)
 
 For each email processed, the code:
 1. Creates new IMAPClient and connects (line 95-96)
@@ -47,7 +47,7 @@ FIX: Reuse clients across the batch of emails.
 
 1.3 MEDIUM: Only First Folder Processed
 ---------------------------------------
-Location: src/protoncalbridge/scheduler.py (line 99)
+Location: src/mail_events_to_caldav/scheduler.py (line 99)
 
     folder=self.filter_config.folders[0] if self.filter_config.folders else "INBOX"
 
@@ -76,7 +76,7 @@ FIX: Add tests for each module. Priority: filter.py, llm_parser.py.
 
 2.2 MEDIUM: Global Mutable State
 ---------------------------------
-Location: src/protoncalbridge/main.py (lines 27, 32, 36-37, 431-510)
+Location: src/mail_events_to_caldav/main.py (lines 27, 32, 36-37, 431-510)
 
     global poller
 
@@ -90,7 +90,7 @@ FIX: Use dependency injection or an application state object.
 
 2.3 MEDIUM: Sync-Async Mismatch
 -------------------------------
-Location: src/protoncalbridge/imap_client.py
+Location: src/mail_events_to_caldav/imap_client.py
 
 The IMAPClient uses synchronous operations (imap_tools MailBox) but is used
 in an async context in scheduler.py. This blocks the event loop.
@@ -106,7 +106,7 @@ SECTION 3: MISSING FEATURES
 
 3.1 MEDIUM: Timezone Not Used
 -----------------------------
-Location: src/protoncalbridge/config_manager.py (line 67)
+Location: src/mail_events_to_caldav/config_manager.py (line 67)
 
 "timezone": "UTC" is stored in config but never used. The LLM parsing returns
 datetime objects but there's no timezone conversion applied.
@@ -118,7 +118,7 @@ FIX: Use pytz or zoneinfo to convert times to configured timezone.
 
 3.2 MEDIUM: ICS Content Not Properly Escaped
 --------------------------------------------
-Location: src/protoncalbridge/caldav_client.py (lines 130-152)
+Location: src/mail_events_to_caldav/caldav_client.py (lines 130-152)
 
 The ICS file generation doesn't escape special characters:
 - Newlines in description
@@ -145,7 +145,7 @@ FIX: Add retry logic with exponential backoff.
 
 3.4 LOW: Graceful Shutdown Incomplete
 -------------------------------------
-Location: src/protoncalbridge/scheduler.py (lines 63-77)
+Location: src/mail_events_to_caldav/scheduler.py (lines 63-77)
 
 The stop() method cancels the task immediately without waiting for the
 current poll cycle to complete.
@@ -161,7 +161,7 @@ SECTION 4: CODE QUALITY ISSUES
 
 4.1 LOW: Unused Import
 -----------------------
-Location: src/protoncalbridge/imap_client.py (line 7)
+Location: src/mail_events_to_caldav/imap_client.py (line 7)
 
     from imap_tools import AND, OR, FolderInfo, ...
 

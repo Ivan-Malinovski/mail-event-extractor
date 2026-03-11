@@ -1,8 +1,8 @@
-# AGENTS.md - ProtonCalBridge
+# AGENTS.md - mail_events_to_caldav
 
 ## Project Overview
 
-ProtonCalBridge is a self-hosted application that bridges Proton Bridge (IMAP) to CalDAV. It monitors email accounts for calendar-related content, uses an LLM to parse event details, and creates calendar events in a CalDAV server.
+mail_events_to_caldav is a self-hosted application that bridges any IMAP account to CalDAV. It monitors email accounts for calendar-related content, uses an LLM to parse event details, and creates calendar events in a CalDAV server.
 
 **Tech Stack**: Python, FastAPI, Docker
 
@@ -44,10 +44,10 @@ pytest --cov=src --cov-report=html
 ### Docker
 ```bash
 # Build image
-docker build -t protoncalbridge .
+docker build -t mail_events_to_caldav .
 
 # Run container
-docker run -d -p 8080:8080 --env-file .env protoncalbridge
+docker run -d -p 8080:8080 --env-file .env mail_events_to_caldav
 
 # Docker Compose
 docker-compose up -d
@@ -79,8 +79,8 @@ import pydantic
 import httpx
 from fastapi import FastAPI
 
-from protoncalbridge.config import Settings
-from protoncalbridge.models import Event
+from mail_events_to_caldav.config import Settings
+from mail_events_to_caldav.models import Event
 ```
 
 ### Naming Conventions
@@ -90,16 +90,16 @@ from protoncalbridge.models import Event
 - **Private members**: `_leading_underscore`
 
 ### Error Handling
-- Use custom exception classes inheriting from `ProtonCalBridgeError`
+- Use custom exception classes inheriting from `MailEventsToCaldavError`
 - Never use bare `except:` - always catch specific exceptions
 - Log errors with appropriate level before re-raising
 - Return meaningful error responses in API
 
 ```python
-class ProtonCalBridgeError(Exception):
+class MailEventsToCaldavError(Exception):
     pass
 
-class IMAPConnectionError(ProtonCalBridgeError):
+class IMAPConnectionError(MailEventsToCaldavError):
     pass
 
 # Good pattern:
@@ -158,7 +158,7 @@ def parse_event(email: EmailMessage) -> CalendarEvent | None:
 
 All configuration is managed via web UI and stored in SQLite.
 
-### 1. IMAP / Proton Bridge Settings
+### 1. IMAP Settings
 - **Host**: IMAP server hostname (e.g., `127.0.0.1`)
 - **Port**: IMAP port (default: `1143`)
 - **Username**: Full email address
@@ -189,8 +189,8 @@ All configuration is managed via web UI and stored in SQLite.
 
 **Default Prompt**:
 ```
-You are an email calendar event parser. Extract calendar events from emails.
-Return a JSON object with: title, start_time, end_time, location, description, all_day (boolean).
+You are an email calendar event parser. Extract calendar events from emails. Feel free to rephrase titles for brevity, and add a fitting emoji in front of the title. If description is relevant, ensure it's easily human readable. If there are more events, output each as separate JSON objects. If you consider it a task, put task as true.
+Return a JSON object with: title, start_time, end_time, location, description, all_day (boolean), task (boolean).
 If no valid event found, return {"error": "no_event"}.
 Times must be in ISO 8601 format.
 ```

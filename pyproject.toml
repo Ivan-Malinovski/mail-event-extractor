@@ -1,10 +1,10 @@
 [tool.poetry]
-name = "protoncalbridge"
+name = "mail_events_to_caldav"
 version = "0.1.0"
-description = "Bridge Proton Bridge (IMAP) to CalDAV with LLM parsing"
-authors = ["ProtonCalBridge"]
+description = "Bridge any IMAP account to CalDAV with LLM parsing"
+authors = ["mail_events_to_caldav"]
 readme = "README.md"
-packages = [{include = "protoncalbridge", from = "src"}]
+packages = [{include = "mail_events_to_caldav", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -21,6 +21,7 @@ aiosqlite = "^0.20.0"
 jinja2 = "^3.1.0"
 pyyaml = "^6.0.0"
 cryptography = "^43.0.0"
+pypdf = "^5.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"

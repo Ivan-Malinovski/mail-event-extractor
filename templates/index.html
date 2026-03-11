@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ProtonCalBridge</title>
+    <title>mail_events_to_caldav</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
@@ -70,8 +70,8 @@
 <body>
     <div class="container">
         <header>
-            <h1>ProtonCalBridge</h1>
-            <p>Bridge Proton Bridge (IMAP) to CalDAV with LLM parsing</p>
+            <h1>mail_events_to_caldav</h1>
+            <p>Bridge any IMAP account to CalDAV with LLM parsing</p>
         </header>
 
         <div id="toast-container" class="toast-container"></div>
@@ -85,7 +85,7 @@
 
         <div id="settings" class="tab-content active">
             <div class="card">
-                <h2>IMAP / Proton Bridge</h2>
+                <h2>IMAP Settings</h2>
                 <form id="imap-form">
                     <div class="form-row">
                         <div class="form-group">
@@ -338,6 +338,7 @@
                 <h2>Email Preview</h2>
                 <p>See which emails match your current filters:</p>
                 <button class="btn btn-primary" onclick="previewEmails()" style="margin: 15px 0;">Refresh Preview</button>
+                <button class="btn btn-primary" onclick="processNow()" style="margin: 15px 0; margin-left: 10px;">Process Now</button>
                 <div id="preview-results"></div>
             </div>
         </div>
@@ -498,6 +499,31 @@
                 console.error('Preview error:', e);
                 setButtonState(btn, 'error');
                 showStatus('Error loading preview: ' + e.message, 'error');
+                setTimeout(() => setButtonState(btn, null), 5000);
+            }
+        }
+
+        async function processNow(btn) {
+            if (!btn) btn = event?.target;
+            setButtonState(btn, 'loading');
+            try {
+                const res = await fetch('/api/emails/process-now', {method: 'POST'});
+                const result = await res.json();
+                if (result.success) {
+                    setButtonState(btn, 'success');
+                    showStatus('Processing triggered! Check History for results.', 'success');
+                    setTimeout(() => {
+                        setButtonState(btn, null);
+                        loadHistory();
+                    }, 3000);
+                } else {
+                    setButtonState(btn, 'error');
+                    showStatus('Error: ' + result.error, 'error');
+                    setTimeout(() => setButtonState(btn, null), 5000);
+                }
+            } catch (e) {
+                setButtonState(btn, 'error');
+                showStatus('Error: ' + e.message, 'error');
                 setTimeout(() => setButtonState(btn, null), 5000);
             }
         }
@@ -974,7 +1000,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'protoncalbridge-config.json';
+            a.download = 'mail-events-to-caldav-config.json';
             a.click();
         }
 
