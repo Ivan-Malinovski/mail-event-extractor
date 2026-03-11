@@ -53,10 +53,12 @@ class IMAPClient:
         except Exception as e:
             error_str = str(e).lower()
             if "login" in error_str or "authentication" in error_str:
-                logger.error(f"IMAP login failed: {e}")
-                raise IMAPAuthenticationError(f"Failed to authenticate: {e}") from e
-            logger.error(f"IMAP connection failed: {e}")
-            raise IMAPConnectionError(f"Failed to connect: {e}") from e
+                err = str(e).encode("utf-8", errors="replace").decode("utf-8")
+                logger.error(f"IMAP login failed: {err}")
+                raise IMAPAuthenticationError(f"Failed to authenticate: {err}") from e
+            err = str(e).encode("utf-8", errors="replace").decode("utf-8")
+            logger.error(f"IMAP connection failed: {err}")
+            raise IMAPConnectionError(f"Failed to connect: {err}") from e
 
     def disconnect(self) -> None:
         if self._mailbox:
@@ -97,7 +99,9 @@ class IMAPClient:
 
             try:
                 msg_list = list(
-                    self._mailbox.fetch(criteria, limit=limit, reverse=True)
+                    self._mailbox.fetch(
+                        criteria, limit=limit, reverse=True, charset="utf-8"
+                    )
                 )
             except Exception as fetch_err:
                 err_msg = (
