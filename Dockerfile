@@ -16,6 +16,8 @@ COPY src/ ./src/
 COPY templates/ ./templates/
 
 ENV PYTHONPATH=/app/src:$PYTHONPATH
+ENV PYTHONIOENCODING=utf-8
+ENV PYTHONUTF8=1
 
 RUN mkdir -p /app/data /data
 
