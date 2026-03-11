@@ -96,8 +96,12 @@ class IMAPClient:
             messages: list[EmailMessage] = []
 
             for msg in self._mailbox.fetch(criteria, limit=limit, reverse=True):
-                email_msg = self._parse_message(msg, folder, include_attachments)
-                messages.append(email_msg)
+                try:
+                    email_msg = self._parse_message(msg, folder, include_attachments)
+                    messages.append(email_msg)
+                except Exception as parse_err:
+                    logger.warning(f"Failed to parse email: {parse_err}")
+                    continue
 
             logger.info(f"Fetched {len(messages)} emails from {folder}")
             return messages
@@ -145,12 +149,20 @@ class IMAPClient:
         if include_attachments and has_attachments:
             attachment_texts = self._extract_attachment_texts(msg.attachments)
 
+        def safe_str(value) -> str:
+            if value is None:
+                return ""
+            try:
+                return str(value)
+            except UnicodeEncodeError:
+                return str(value.encode("utf-8", errors="replace"), "utf-8")
+
         return EmailMessage(
-            message_id=msg.uid or "",
-            subject=msg.subject or "",
-            sender=str(msg.from_) or "",
+            message_id=safe_str(msg.uid),
+            subject=safe_str(msg.subject),
+            sender=safe_str(msg.from_),
             folder=folder,
-            recipient=str(msg.to[0]) if msg.to else None,
+            recipient=safe_str(msg.to[0]) if msg.to else None,
             date=msg.date,
             body_text=self._get_text_body(msg),
             body_html=self._get_html_body(msg),
